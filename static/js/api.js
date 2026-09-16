@@ -32,6 +32,9 @@ async function request(path, options = {}) {
 
 export const getSession = () => request('/api/session');
 
+/** Every window already on disk. Pure filesystem read — no key, no upstream call. */
+export const getCache = () => request('/api/cache');
+
 export const postKey = (apiKey, region) => request('/api/key', {
   method: 'POST', body: JSON.stringify({ api_key: apiKey, region }),
 });

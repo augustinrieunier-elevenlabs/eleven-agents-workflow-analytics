@@ -1,7 +1,7 @@
 // Setup screen — SPEC §1.
 // The key is forwarded to the backend and never persisted client-side.
 
-import { h, daysBetween, shortDate } from '../util.js';
+import { attr, h, daysBetween, int, shortDate } from '../util.js';
 
 const chipStyle = (on) => (on
   ? 'background:var(--ink);color:var(--ink-inv);border-color:var(--ink)'
@@ -61,6 +61,48 @@ function keyPicker(state) {
       <b>${h(chosen)}</b> is selected but not yet active — click <b>Use</b> to switch to it.</div>` : ''}
     ${memoryOnly ? `<div class="note note--warn" style="margin-bottom:10px"><span>No OS keychain here —
       saved keys last only until the server restarts.</span></div>` : ''}`;
+}
+
+/**
+ * Windows already on disk.
+ *
+ * `/api/window` has always served a cached window with no key — but only to
+ * someone who already knew the agent id and the exact two dates, which nobody
+ * remembers. This lists what is actually there so it can be opened in one
+ * click, and shows how complete each one is: a window synced through a rate
+ * limit can be missing hundreds of conversation details, and a figure derived
+ * from 7,916 of 8,173 conversations is not the figure for that window.
+ */
+function cachedWindows(state) {
+  const all = state.cacheWindows || [];
+  if (!all.length) return '';
+  const rows = all.slice(0, 8);
+  return `
+    <div class="card card--inset" style="margin-top:10px">
+      <div class="card__head" style="padding:10px 12px">
+        <h3 style="font-size:13.5px">Open a window already on disk</h3>
+        <div class="sub">no API call — reads the local cache</div>
+      </div>
+      <div class="card__body" style="padding:4px 8px;overflow-x:auto">
+        <table class="tbl tbl--tight">
+          <tbody>${rows.map((w) => `
+            <tr>
+              <td><div style="font-weight:500">${h(w.agent_name || w.agent_id)}</div>
+                <div class="mono" style="font-size:9.5px;color:var(--ink-3)">${h(w.region)} ·
+                  ${h(w.from)} → ${h(w.to)}</div></td>
+              <td class="num">${int(w.cached)}<span class="thn">conversations</span></td>
+              <td class="small">${w.missing
+                ? `<span class="badge badge--warn mono" title="Listed in the index but never fetched — a sync that hit a rate limit, or was interrupted. Re-sync with a key to fill them.">${int(w.missing)} missing</span>`
+                : '<span class="muted">complete</span>'}${w.agent_doc
+                ? '' : ' <span class="badge badge--warn mono" title="No agent definition cached, so prompts and the graph will be unavailable.">no definition</span>'}</td>
+              <td class="num"><button class="btn btn--sm" data-act="load-cached"
+                data-id="${attr(w.key)}" ${state.busy ? 'disabled' : ''}>Load</button></td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      ${all.length > rows.length ? `<div class="card__foot"><span>${int(all.length - rows.length)}
+        older window${all.length - rows.length === 1 ? '' : 's'} not shown.</span></div>` : ''}
+    </div>`;
 }
 
 function keySaveRow(state) {
@@ -373,7 +415,7 @@ function readyNote(state) {
  * action that establishes a workspace without a key, and the button would be
  * pointless if the steps it feeds stayed hidden.
  */
-export const workspaceReady = (state) => !!state.hasKey || !!state.demoSeeded;
+export const workspaceReady = (state) => !!state.hasKey || !!state.demoSeeded || !!state.cacheOnly;
 
 export function renderSetup(state) {
   const brand = `
@@ -410,6 +452,7 @@ export function renderSetup(state) {
             account with its own key and its own workspace, so the cache is kept separate per region.
           </div>
           ${keySaveRow(state)}
+          ${cachedWindows(state)}
           ${state.keyError ? `<div class="note note--warn" style="margin-top:10px"><b>${h(state.keyError.status || '')}</b>
             <span>${h(state.keyError.message)}</span></div>` : ''}
         </div>
@@ -435,7 +478,16 @@ export function renderSetup(state) {
           <div class="badge badge--solid mono">3</div><h3>Window</h3>
           <div class="sub">conversations to cost</div>
         </div>
-        <div class="card__body">${windowCard(state)}</div>
+        <div class="card__body">${windowCard(state)}
+          <label class="row" style="gap:7px;margin-top:10px;cursor:pointer;align-items:center">
+            <input type="checkbox" data-act="toggle-cache-only" ${state.cacheOnly ? 'checked' : ''}
+              ${state.hasKey ? '' : 'disabled'} style="cursor:pointer">
+            <span class="small">Use cached files only — no API calls.
+              ${state.hasKey
+                ? 'Retrieve reads what is on disk and fetches nothing.'
+                : 'Always on with no key held: there is nothing to fetch with.'}</span>
+          </label>
+        </div>
       </div>
 
       <div class="row row--wrap" style="margin-top:4px">

@@ -56,6 +56,11 @@ const state = {
   // Set only by the demo action. The demo writes a window without a key, so it
   // is the one path besides connecting that opens steps 2 and 3.
   demoSeeded: false,
+  // Windows already on disk, and whether the user asked to work from them
+  // rather than sync. `/api/window` has always served a cached window without a
+  // key; these two make that reachable and explicit.
+  cacheWindows: [],
+  cacheOnly: false,
   loadError: null,
   busy: false,
 
@@ -204,6 +209,17 @@ function resetWorkspace() {
   state.toolOpen = null;
   // Demo data belongs to the demo region; a key change moves off it.
   state.demoSeeded = false;
+  state.cacheOnly = false;
+}
+
+/** What is already on disk, so the setup screen can offer it. */
+async function loadCacheWindows() {
+  try {
+    const res = await api.getCache();
+    state.cacheWindows = (res.regions || []).flatMap((r) => r.windows || []);
+  } catch (e) {
+    state.cacheWindows = [];
+  }
 }
 
 /** Short label for the branch selection, for the sidebar and topbar. */
@@ -691,7 +707,10 @@ async function retrieve() {
   render();
 
   try {
-    if (state.hasKey) {
+    // `cacheOnly` is the user's explicit "do not call the API". Without it a
+    // held key always syncs, which is the whole reason a window already on disk
+    // could not simply be opened.
+    if (state.hasKey && !state.cacheOnly) {
       const job = await api.startSync(state.agentId, state.from, state.to, false, state.branchIds);
       const finished = await pollSync(job.job_id);
       if (finished.state === 'error') {
@@ -706,9 +725,10 @@ async function retrieve() {
   } catch (e) {
     state.loadError = { status: e.status, message: e.message };
     if (e.status === 409) {
-      state.loadError.message = state.hasKey
+      state.loadError.message = (state.hasKey && !state.cacheOnly)
         ? e.message
-        : 'This window is not in the cache and no API key is held. Connect a key, or seed the demo data.';
+        : 'This window is not on disk. Untick “cached files only” and connect a key to fetch it, '
+          + 'or pick one of the cached windows listed in step 1.';
     }
     state.phase = 'setup';
   } finally {
@@ -867,6 +887,34 @@ const actions = {
       state.loadError = { status: e.status, message: e.message };
     } finally { state.busy = false; }
   },
+
+  // Open a window straight from disk: it already carries its agent and dates,
+  // so there is nothing left to choose.
+  'load-cached': async (el) => {
+    const w = (state.cacheWindows || []).find((x) => x.key === el.dataset.id);
+    if (!w || state.busy) return;
+    resetWorkspace();
+    state.cacheOnly = true;
+    state.loadError = null;
+    if (w.region !== state.region) {
+      state.region = w.region;
+      api.setRegion(state.region);
+    }
+    state.agentId = w.agent_id;
+    state.from = w.from;
+    state.to = w.to;
+    state.preset = null;
+    state.busy = true; render();
+    try {
+      await loadAgents();
+      await loadBranches();
+      await loadDependencies();
+    } catch (e) { /* the window read below is what matters */ }
+    state.busy = false;
+    await retrieve();
+  },
+
+  'toggle-cache-only': () => { state.cacheOnly = !state.cacheOnly; },
 
   'reload-agents': async () => { state.busy = true; render(); await loadAgents(true); state.busy = false; },
 
@@ -1032,6 +1080,7 @@ document.addEventListener('keydown', (event) => {
   render();
   await refreshSession();
   await loadSavedKeys();
+  await loadCacheWindows();
   // Only once something is connected. `/api/agents` is a cache read, so calling
   // it cold returns whatever a previous sync left on disk and pulls a whole
   // agent list into memory before the user has chosen anything. Every path that

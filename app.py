@@ -12,6 +12,7 @@ the latter.
 
 import calendar
 import os
+import re
 import threading
 import time
 import uuid
@@ -505,6 +506,82 @@ def get_conversation(conversation_id):
 
 
 # ── window bundle ──────────────────────────────────────────────────────
+
+WINDOW_FILE = re.compile(r"^(?P<agent>.+)_(?P<frm>\d{4}-\d{2}-\d{2})_(?P<to>\d{4}-\d{2}-\d{2})\.json$")
+
+
+@app.route("/api/cache")
+def get_cache():
+    """Every window already on disk, across every region.
+
+    A pure filesystem read: no key, no upstream call. Without it the only way to
+    reach cached data is to already know the agent id and the exact two dates,
+    which is not something anyone remembers. `/api/window` has always served a
+    cached window without a key; this is what makes that reachable.
+
+    The agent id cannot be split off the filename by the first underscore —
+    agent ids contain them — so the two trailing dates anchor the parse.
+    """
+    out = []
+    root = DATA_DIR
+    if not os.path.isdir(root):
+        return jsonify({"regions": [], "stats": store.store_stats()})
+
+    for slug in sorted(os.listdir(root)):
+        idx_dir = os.path.join(root, slug, "conversations", "index")
+        if not os.path.isdir(idx_dir):
+            continue
+        # One listing of the details directory per region, so completeness is an
+        # O(1) set lookup per conversation rather than a stat per id.
+        conv_dir = os.path.join(root, slug, "conversations")
+        on_disk = set()
+        if os.path.isdir(conv_dir):
+            on_disk = {n[:-5] for n in os.listdir(conv_dir) if n.endswith(".json")}
+        agents_dir = os.path.join(root, slug, "agents")
+        agent_docs = set()
+        if os.path.isdir(agents_dir):
+            agent_docs = {n[:-5] for n in os.listdir(agents_dir) if n.endswith(".json")}
+
+        windows = []
+        for name in sorted(os.listdir(idx_dir)):
+            match = WINDOW_FILE.match(name)
+            if not match:
+                continue
+            rel = os.path.join(store.ns(slug), "conversations", "index", name)
+            index = store.read(rel)
+            if index is None:
+                continue
+            rows = index.get("conversations") or []
+            ids = [r.get("conversation_id") for r in rows if r.get("conversation_id")]
+            cached = sum(1 for cid in ids if store.safe(cid) in on_disk)
+            agent_id = match.group("agent")
+            windows.append({
+                # One opaque handle for the UI to pass back, so the client never
+                # has to re-derive region + agent + dates from a label.
+                "key": "%s|%s|%s|%s" % (slug, agent_id, match.group("frm"), match.group("to")),
+                "region": slug,
+                "agent_id": agent_id,
+                # The index rows carry the name the API reported at sync time,
+                # so a window stays labelled even with no agent document cached.
+                "agent_name": next((r.get("agent_name") for r in rows if r.get("agent_name")), None),
+                "from": match.group("frm"),
+                "to": match.group("to"),
+                "listed": len(ids),
+                "cached": cached,
+                "missing": len(ids) - cached,
+                "agent_doc": store.safe(agent_id) in agent_docs,
+                "fetched_at": store.fetched_at(rel),
+            })
+        if windows:
+            windows.sort(key=lambda w: (w.get("fetched_at") or 0), reverse=True)
+            out.append({
+                "region": slug,
+                "label": RESIDENCY.get(slug, {}).get("label", slug),
+                "windows": windows,
+            })
+
+    return jsonify({"regions": out, "stats": store.store_stats()})
+
 
 @app.route("/api/window")
 def get_window():
