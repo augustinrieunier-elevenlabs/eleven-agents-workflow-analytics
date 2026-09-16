@@ -3,6 +3,7 @@
 import { levers } from '../derive.js';
 import {
   alignedUsd, barBg, h, int, num, pct, rate1m, shortDate, signedPct, spark, sum, usd, usd6,
+  versionSelect,
 } from '../util.js';
 
 function tiles(model) {
@@ -223,8 +224,11 @@ export function renderAnalytics(model, state) {
     <div><h1>Token analytics</h1>
       <div class="sub">${h(state.rangeLong)} · ${int(model.totals.conversations)} conversations · every number below is
         derived from per-node token counts, not sampled.</div></div>
-    <div class="page__actions"><div class="seg">${layouts.map(([k, label]) =>
-      `<button data-act="layout" data-id="${k}" aria-pressed="${state.layout === k}">${label}</button>`).join('')}</div></div>
+    <div class="page__actions">
+      ${versionSelect(state)}
+      <div class="seg">${layouts.map(([k, label]) =>
+      `<button data-act="layout" data-id="${k}" aria-pressed="${state.layout === k}">${label}</button>`).join('')}</div>
+    </div>
   </div>`;
 
   if (state.layout === 'ledger') {

@@ -5,7 +5,7 @@
 import { isPerTurnKind, segColor } from '../derive.js';
 import { avatarLegend } from '../models.js';
 import { tokenizerExact, tokenizerLabel, tokenizerSource } from '../tokenizer.js';
-import { h, int, num, pct, usd } from '../util.js';
+import { h, int, num, pct, usd, versionSelect } from '../util.js';
 
 // Sortable columns. `value` returns the number or string the column sorts on;
 // `render` draws the cell. Composition has no meaningful ordering.
@@ -215,7 +215,7 @@ export function renderPrompts(model, state) {
         arrives per turn. Static prompt text is the part you can shrink without changing behaviour.</div>
     </div>
     <div class="page__actions">
-      <span class="badge mono">${h(state.versionLabel || 'any version')}</span>
+      ${versionSelect(state)}
       <span class="badge ${src === 'cl100k' ? 'badge--ok' : 'badge--warn'} mono"><i class="dot"></i>${src}</span>
     </div>
   </div>

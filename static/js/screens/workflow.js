@@ -4,7 +4,7 @@
 import { NODE_H, NODE_W, UNATTRIBUTED } from '../derive.js';
 import { edgePath } from '../graph.js';
 import {
-  barBg, daysBetween, h, int, median, ms, num, pct, ramp, signedPct, usd,
+  barBg, daysBetween, h, int, median, ms, num, pct, ramp, signedPct, usd, versionSelect,
 } from '../util.js';
 
 const ENCODINGS = [
@@ -250,7 +250,7 @@ export function renderWorkflow(model, state) {
     </div>
     <div class="page__actions">
       <span class="badge mono">${model.ledger.length} nodes</span>
-      <span class="badge mono">${h(state.versionLabel || 'any version')}</span>
+      ${versionSelect(state)}
     </div>
   </div>
 

@@ -963,7 +963,11 @@ export function buildModel(bundle, opts = {}) {
       llmCalls: convLlmCalls,
       steps: steps.map((s) => ({
         nodeId: s.nodeId,
-        label: (nodeById.get(s.nodeId) || {}).label || s.nodeId,
+        // `nodeId` here is the `agentId::nodeId` join key. When the graph has no
+        // node under it — routine, because a conversation can have run a node
+        // that a later version deleted — fall back to the bare node id. The join
+        // key must never surface: it reads as a name and it is not one.
+        label: (nodeById.get(s.nodeId) || {}).label || splitKey(s.nodeId).nodeId,
         model: dominantModel(s.usage),
         turns: s.turns,
         tin: s.tin,
@@ -1007,6 +1011,15 @@ export function buildModel(bundle, opts = {}) {
   }
   if (offVersion) {
     warnings.push(offVersion + ' conversation(s) ran a different version than the pinned one and are excluded.');
+  }
+  // Same rule as the branch filter: a conversation the API recorded no version on
+  // is kept rather than guessed at. Said out loud, because otherwise pinning a
+  // version whose dropdown entry reads "1 conv" returns far more than one and the
+  // arithmetic looks broken.
+  const unversioned = conversations.filter((c) => !c.version).length;
+  if (pinnedVersion && unversioned) {
+    warnings.push(unversioned + ' conversation(s) carry no version id. They are kept in the window rather '
+      + 'than guessed at, so a version pin does not narrow them.');
   }
   if (offBranch) {
     warnings.push(offBranch + ' conversation(s) ran on a branch outside the selected set and are excluded.');

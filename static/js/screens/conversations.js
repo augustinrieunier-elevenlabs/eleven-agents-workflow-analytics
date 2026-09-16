@@ -1,6 +1,6 @@
 // Conversations screen — SPEC §4.
 
-import { dur, h, int, num, pct, quantile, stampOf, sum, usd } from '../util.js';
+import { dur, h, int, num, pct, quantile, stampOf, sum, usd, versionSelect } from '../util.js';
 
 export function outcomeFilters(model) {
   const seen = new Map();
@@ -60,6 +60,7 @@ export function renderConversations(model, state) {
       <div class="sub">Each row is one conversation in the window, costed from its own node path. Open one to see
         where its tokens went.</div></div>
     <div class="page__actions">
+      ${versionSelect(state)}
       <div class="seg">${filters.map((f) =>
         `<button data-act="conv-filter" data-id="${h(f)}" aria-pressed="${state.convFilter === f}">${h(f)}</button>`).join('')}</div>
     </div>

@@ -401,6 +401,9 @@ input, select, textarea { font:inherit; }
   position:fixed; right:0; top:0; bottom:0; width:520px; background:var(--bg-2); border-left:1px solid var(--line);
   box-shadow:var(--shadow-lg); padding:18px 20px; overflow:auto; z-index:80;
 }
+/* The conversation drawer carries a chart beside its tiles, which needs the room.
+   max-width keeps it off the left edge on a laptop; the row inside wraps below it. */
+.drawer--wide { width:900px; max-width:94vw; }
 .scrim { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:70; }
 .ph { border:1px dashed var(--line); border-radius:var(--r-md); padding:10px; color:var(--ink-3); font-family:var(--font-mono); font-size:11px; }
 

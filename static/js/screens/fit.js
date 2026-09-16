@@ -5,7 +5,7 @@
 // *capable enough* for a node is deliberately left unanswered — that is the
 // assessment step, and this screen is the evidence it would be built on.
 
-import { alignedUsd, barBg, h, int, num, pct, rate1m, usd } from '../util.js';
+import { alignedUsd, barBg, h, int, num, pct, rate1m, usd, versionSelect } from '../util.js';
 
 const VERDICT = {
   headroom: ['badge badge--ok', 'looks over-provisioned', 'Headroom signals and no strain.'],
@@ -234,7 +234,7 @@ export function renderFit(model, state) {
     <div class="page__actions">
       <span class="badge mono">${int(nodes.length)}${state.fitAgent ? ' of ' + int(all.length) : ''} nodes</span>
       ${agents.length > 1 ? `<span class="badge mono">${agents.length} agents</span>` : ''}
-      <span class="badge mono">${h(state.versionLabel || 'any version')}</span>
+      ${versionSelect(state)}
     </div>
   </div>
 

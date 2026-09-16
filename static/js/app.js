@@ -418,8 +418,11 @@ async function loadObservedVersions() {
     seen.set(conv.version, row);
   }
 
+  // Enrich the versions someone would plausibly pin — the ones carrying traffic.
+  // Each is one cached-or-fetched request, so the cap is a first-load cost only;
+  // beyond it a version still appears in the picker, labelled by its id suffix.
   const versions = Array.from(seen.values()).sort((a, b) => b.conversations - a.conversations);
-  await Promise.all(versions.slice(0, 12).map(async (v) => {
+  await Promise.all(versions.slice(0, 24).map(async (v) => {
     try {
       const res = await api.getVersion(state.agentId, v.id);
       const meta = res.data || {};
@@ -751,6 +754,22 @@ const actions = {
   },
   'pick-version-select': (el) => {
     state.versionId = el.value || null; state.versionTouched = true; syncVersionPin();
+  },
+
+  // The same pin, changed from an analysis header after the window is loaded.
+  // Version scope is applied in buildModel, not by the fetch, so this re-derives
+  // from the conversations already in hand — no sync, no request. The observed
+  // version list is built from model.allConversations, which is never narrowed
+  // by the pin, so switching back to "any version" always remains possible.
+  'pick-version-window': (el) => {
+    state.versionId = el.value || null;
+    state.versionTouched = true;
+    // An open drawer may be for a node that this version never ran.
+    state.node = null;
+    state.conv = null;
+    state.convLimit = 60;
+    syncVersionPin();
+    rebuild();
   },
 
   'toggle-branch': (el) => {

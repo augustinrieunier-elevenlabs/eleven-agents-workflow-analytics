@@ -93,6 +93,66 @@ export const h = (v) => String(v == null ? '' : v)
 
 export const attr = h;
 
+const VERSION_HINT = 'Narrow the window to the conversations that ran one agent version. '
+  + 'The options are the versions actually observed in this window — the API has no list-versions '
+  + 'endpoint, so a version is only known to exist because a conversation ran it. '
+  + 'This filters traffic, not definitions: node prompts and the graph still come from the agent '
+  + 'document retrieved for this window. Conversations the API recorded no version on are kept '
+  + 'under every pin rather than guessed at, so a pin may return more conversations than its count.';
+
+/** Versions carrying at least this much traffic are worth reading on their own. */
+const VERSION_THIN = 2;
+
+/**
+ * Version filter for an analysis header, shaped like the badge it replaces.
+ *
+ * Rendered on every analysis screen so the pin can be changed from wherever the
+ * number that looks wrong is. Switching it re-derives from the conversations
+ * already in hand — no sync, no request. When no conversation in the window
+ * carries a version id there is nothing to choose between, so this degrades to
+ * the plain badge rather than an empty dropdown.
+ *
+ * Grouped rather than flat because an actively edited agent produces a lot of
+ * versions: one real window here has 112 across 277 conversations, 55 of them
+ * with a single conversation each. A flat list of those buries the handful that
+ * carry enough traffic to read anything off, so traffic is the sort key and the
+ * single-conversation tail goes in its own group with its thinness stated.
+ */
+export const versionSelect = (state) => {
+  const sel = state.branchIds || [];
+  // Same scoping rule as the branch picker: a version off the selected branches
+  // would exclude every conversation, so it is not offered.
+  const opts = (state.versions || []).filter((v) => !v.branchId || !sel.length
+    || sel.indexOf(v.branchId) !== -1);
+  if (!opts.length) {
+    return '<span class="badge mono" title="No conversation in this window recorded a version id.">'
+      + 'any version</span>';
+  }
+  const total = opts.reduce((a, v) => a + (v.conversations || 0), 0);
+  const pinned = state.versionId && opts.some((v) => v.id === state.versionId);
+  const byTraffic = opts.slice().sort((a, b) => (b.conversations || 0) - (a.conversations || 0)
+    || (b.committedAt || 0) - (a.committedAt || 0));
+  const option = (v) => `<option value="${h(v.id)}"${v.id === state.versionId ? ' selected' : ''}>`
+    + h(v.label + (v.date ? ' · ' + v.date : '') + ' · ' + int(v.conversations) + ' conv')
+    + '</option>';
+  const group = (label, rows) => (rows.length
+    ? `<optgroup label="${attr(label)}">${rows.map(option).join('')}</optgroup>` : '');
+  const thick = byTraffic.filter((v) => (v.conversations || 0) >= VERSION_THIN);
+  const thin = byTraffic.filter((v) => (v.conversations || 0) < VERSION_THIN);
+
+  return `<span class="badge mono${pinned ? ' badge--info' : ''}" style="padding:1px 7px 1px 9px;gap:3px"
+    title="${attr(VERSION_HINT)}">
+    <select data-act="pick-version-window" aria-label="Filter by agent version"
+      style="appearance:none;-webkit-appearance:none;border:0;background:transparent;font:inherit;
+             color:inherit;padding:0;margin:0;cursor:pointer;outline:none">
+      <option value=""${pinned ? '' : ' selected'}>${h('any version · ' + int(total) + ' conv')}</option>
+      ${thin.length && thick.length
+        ? group(int(thick.length) + ' versions with traffic', thick)
+          + group(int(thin.length) + ' versions with one conversation each', thin)
+        : byTraffic.map(option).join('')}
+    </select><span aria-hidden="true" style="opacity:.5;font-size:9px">▾</span></span>`;
+};
+
 /** Sequential ramp bin — the Heat encoding on the graph. */
 export const ramp = (share, max) => {
   const t = max ? share / max : 0;
