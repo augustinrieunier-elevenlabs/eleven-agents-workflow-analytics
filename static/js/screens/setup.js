@@ -39,18 +39,26 @@ function keyPicker(state) {
       ${memoryOnly ? 'this process only (no keychain on this platform)' : 'your OS keychain'}
       so you can pick it from here next time.</div>`;
   }
+  // What the picker is showing: the pending choice, else whatever key is live.
+  // Bound to the same value Use and Forget act on, so the control can never
+  // disagree with the buttons beside it.
+  const chosen = state.aliasPick || state.activeAlias || '';
   return `
     <div class="row row--wrap" style="gap:8px;margin-bottom:10px">
       <span class="field__k">saved key</span>
       <select class="field" data-act="pick-saved-key" style="flex:1 1 220px;height:30px">
-        <option value="">— choose an alias —</option>
-        ${keys.map((k) => `<option value="${h(k.alias)}" ${k.alias === state.activeAlias ? 'selected' : ''}>
-          ${h(k.alias)} · ${h(k.region || '?')} · ${h(k.mask || '')}${k.available ? '' : ' (missing)'}
+        <option value=""${chosen ? '' : ' selected'}>— choose an alias —</option>
+        ${keys.map((k) => `<option value="${h(k.alias)}"${k.alias === chosen ? ' selected' : ''}>
+          ${h(k.alias)} · ${h(k.region || '?')} · ${h(k.mask || '')}${k.available ? '' : ' (missing)'}${
+          k.alias === state.activeAlias ? ' · in use' : ''}
         </option>`).join('')}
       </select>
-      <button class="btn btn--sm" data-act="use-saved-key" ${state.aliasDraft || state.activeAlias ? '' : 'disabled'}>Use</button>
-      <button class="btn btn--ghost btn--sm" data-act="forget-saved-key">Forget</button>
+      <button class="btn btn--sm" data-act="use-saved-key" ${chosen ? '' : 'disabled'}>
+        ${chosen && chosen === state.activeAlias ? 'Reload' : 'Use'}</button>
+      <button class="btn btn--ghost btn--sm" data-act="forget-saved-key" ${chosen ? '' : 'disabled'}>Forget</button>
     </div>
+    ${chosen && chosen !== state.activeAlias ? `<div class="small muted" style="margin-bottom:8px">
+      <b>${h(chosen)}</b> is selected but not yet active — click <b>Use</b> to switch to it.</div>` : ''}
     ${memoryOnly ? `<div class="note note--warn" style="margin-bottom:10px"><span>No OS keychain here —
       saved keys last only until the server restarts.</span></div>` : ''}`;
 }
@@ -348,6 +356,25 @@ function readyNote(state) {
     + (state.hasKey ? '' : ' No key held: only an already-cached window can be opened.');
 }
 
+/**
+ * Has a key been chosen or entered?
+ *
+ * Steps 2 and 3 stay unrendered until it has. Before that the agent list has
+ * nothing to pick from, the branch and version chips have nothing to offer, and
+ * Retrieve is disabled anyway.
+ *
+ * This deliberately does **not** fall back to "agents are loaded". `/api/agents`
+ * is a cache read that needs no key, so on any machine that has ever synced it
+ * returns the previous list — 1,211 agents on one real install — and a
+ * predicate that accepted that filled step 2 on a cold load with nothing
+ * connected, which is the opposite of the gate.
+ *
+ * `demoSeeded` is the one other way in: loading the demo data is an explicit
+ * action that establishes a workspace without a key, and the button would be
+ * pointless if the steps it feeds stayed hidden.
+ */
+export const workspaceReady = (state) => !!state.hasKey || !!state.demoSeeded;
+
 export function renderSetup(state) {
   const brand = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:26px">
@@ -388,6 +415,7 @@ export function renderSetup(state) {
         </div>
       </div>
 
+      ${workspaceReady(state) ? `
       <div class="card">
         <div class="card__head">
           <div class="badge badge--solid mono">2</div><h3>Agent, branch &amp; version</h3>
@@ -415,7 +443,14 @@ export function renderSetup(state) {
         <button class="btn btn--ghost" data-act="toggle-wizard">Compact entry</button>
         <button class="btn btn--primary" data-act="retrieve" style="height:34px" ${state.agentId ? '' : 'disabled'}>
           Retrieve agent &amp; conversations</button>
-      </div>
+      </div>` : `
+      <div class="row row--wrap" style="margin-top:4px;gap:10px;align-items:center">
+        <div class="small muted" style="flex:1 1 260px">
+          Connect a key, pick a saved one, or load the demo data — the agent, branch and window
+          steps appear once there is a workspace to read.
+        </div>
+        <button class="btn btn--ghost" data-act="toggle-wizard">Compact entry</button>
+      </div>`}
     </div>`;
 
   const compact = `

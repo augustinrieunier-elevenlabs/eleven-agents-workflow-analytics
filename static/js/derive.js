@@ -6,7 +6,7 @@
 // JSON — there is no backend aggregation to blame.
 
 import { contextWindow, nodeAvatar, provider } from './models.js';
-import { countTokens } from './tokenizer.js';
+import { approxTokensFromChars, countTokens } from './tokenizer.js';
 import { dayKey, daysBetween, pct, quantile, shiftDays, sum } from './util.js';
 
 export const UNATTRIBUTED = '__unattributed__';
@@ -61,6 +61,121 @@ const SEG_BG = {
 };
 export const SEG_ORDER = Object.keys(SEG_BG);
 export const segColor = (kind) => SEG_BG[kind] || 'var(--line)';
+
+/**
+ * Tool-call `type` values that are the workflow engine's own mechanics rather
+ * than tools anyone authored: `progress_workflow`, `notify_condition_N_met`,
+ * `update_state`, `guardrail_triggered`, `start_procedure`/`end_procedure`.
+ * They arrive through the same `tool_calls` channel, have no tool document
+ * because none was ever written, and on one real window account for 4,536 of
+ * 5,053 calls. Showing them next to a webhook invites the reading that
+ * `progress_workflow` is something to optimise; it is the graph advancing.
+ *
+ * A deny-list rather than an allow-list on purpose: a tool `type` this code has
+ * never seen should show up on the screen, not vanish from it.
+ */
+const PLUMBING_TOOL_TYPES = new Set(['workflow']);
+
+/**
+ * Is this call the graph advancing rather than a tool someone chose?
+ *
+ * `workflow` always is: `progress_workflow` and `notify_condition_*` are the
+ * transition mechanism, and no document exists for them because none was ever
+ * authored.
+ *
+ * `system` is the ambiguous one, and type alone cannot separate it. The same
+ * type covers built-ins an author explicitly switched on (`update_state`,
+ * `run_subagent`, `skip_turn`) and platform mechanics nobody asked for
+ * (`start_procedure`, `end_procedure`, `guardrail_triggered`, `end_call`). The
+ * declaration is the discriminator: if a node lists the name in
+ * `built_in_tools`, someone chose it and it belongs on the screen. Measured on
+ * live data that splits 47 declared calls from 97 undeclared ones.
+ *
+ * Data-driven rather than a hardcoded name list, so it adapts to whatever a
+ * workspace has switched on.
+ */
+export function isPlumbingTool(type, name, declaredBuiltIns) {
+  const kind = String(type || '');
+  if (PLUMBING_TOOL_TYPES.has(kind)) return true;
+  if (kind !== 'system') return false;
+  const declared = declaredBuiltIns instanceof Set
+    ? declaredBuiltIns
+    : new Set(declaredBuiltIns || []);
+  return !declared.has(String(name || ''));
+}
+
+const textLength = (value) => {
+  if (value == null) return 0;
+  if (typeof value === 'string') return value.length;
+  try { return JSON.stringify(value).length; } catch (e) { return 0; }
+};
+
+/** Blank accumulator for one tool name. */
+const newToolStat = (name) => ({
+  name,
+  types: new Set(),
+  calls: 0,
+  convIds: new Set(),
+  nodeIds: new Set(),
+  agentIds: new Set(),
+  errors: 0,
+  blocked: 0,
+  errorTypes: new Map(),
+  latencies: [],
+  paramChars: 0,
+  resultChars: 0,
+  maxResultChars: 0,
+  // Output tokens on the calling turn are the arguments the model generated —
+  // near-exact, because there is only ever one call per turn.
+  paramsOut: 0,
+  // The calling turn's whole usage. Exact money, but caused by the node's
+  // prompt, not by the tool. Reported as exposure, never as the tool's cost.
+  turnIn: 0,
+  turnCost: 0,
+  callsWithoutUsage: 0,
+  variables: new Set(),
+});
+
+/** Fold one tool call and its matched result into the accumulator. */
+function collectToolCall(stats, call, result, ctx) {
+  if (!call || typeof call !== 'object') return;
+  const name = (typeof call.tool_name === 'string' && call.tool_name.trim()) || '(unnamed tool)';
+  if (!stats.has(name)) stats.set(name, newToolStat(name));
+  const stat = stats.get(name);
+  stat.types.add(call.type || null);
+  stat.calls += 1;
+  stat.convIds.add(ctx.convId);
+  if (ctx.nodeId) stat.nodeIds.add(ctx.nodeId);
+  if (ctx.agentId) stat.agentIds.add(ctx.agentId);
+  stat.paramChars += textLength(call.params_as_json);
+  stat.paramsOut += ctx.tokens.output;
+  stat.turnIn += ctx.tokens.input;
+  stat.turnCost += ctx.hasLlm ? usageCost(ctx.usage) : 0;
+  if (!ctx.hasLlm) stat.callsWithoutUsage += 1;
+
+  const res = result || {};
+  if (res.is_error) {
+    stat.errors += 1;
+    const kind = (typeof res.error_type === 'string' && res.error_type.trim()) || 'unspecified';
+    stat.errorTypes.set(kind, (stat.errorTypes.get(kind) || 0) + 1);
+  }
+  if (res.is_blocked) stat.blocked += 1;
+  if (typeof res.tool_latency_secs === 'number' && isFinite(res.tool_latency_secs)) {
+    stat.latencies.push(res.tool_latency_secs);
+  }
+  const chars = textLength(res.result_value != null ? res.result_value : res.result);
+  stat.resultChars += chars;
+  if (chars > stat.maxResultChars) stat.maxResultChars = chars;
+  const updates = res.dynamic_variable_updates;
+  if (Array.isArray(updates)) {
+    for (const u of updates) {
+      const key = u && (u.variable_name || u.name);
+      if (key) stat.variables.add(String(key));
+    }
+  } else if (updates && typeof updates === 'object') {
+    for (const key of Object.keys(updates)) stat.variables.add(key);
+  }
+}
 
 const PER_TURN_KINDS = new Set([
   'conversation history', 'retrieved chunks', 'dynamic variables', 'case summary',
@@ -455,7 +570,36 @@ function nodeTools(def) {
     (override.additional_tool_ids || []).forEach(add);
     (override.tool_ids || []).forEach(add);
   }
+  // An `override_agent` node carries its own conversation_config, and the tools
+  // attached there were being missed entirely.
+  const prompt = ((def.conversation_config || {}).agent || {}).prompt || {};
+  (prompt.tool_ids || []).forEach(add);
   return Array.from(ids);
+}
+
+/**
+ * Built-in tools the node declares, by name.
+ *
+ * These are the platform's own tools an author switched on — `update_state`,
+ * `run_subagent`, `skip_turn`, `language_detection`, `transfer_to_agent`. They
+ * arrive at runtime as `type: "system"` tool calls, indistinguishable by type
+ * from the graph's own markers (`start_procedure`, `guardrail_triggered`), so
+ * the declaration is the only thing that separates a tool someone chose from
+ * platform mechanics.
+ */
+function nodeBuiltIns(def) {
+  if (!def || typeof def !== 'object') return [];
+  const names = new Set();
+  const collect = (bag) => {
+    if (!bag || typeof bag !== 'object') return;
+    for (const [name, value] of Object.entries(bag)) {
+      if (value != null) names.add(name);
+    }
+  };
+  collect(def.built_in_tools);
+  collect((((def.conversation_config || {}).agent || {}).prompt || {}).built_in_tools);
+  if (def.override_agent) collect(def.override_agent.built_in_tools);
+  return Array.from(names);
 }
 
 /**
@@ -588,6 +732,13 @@ function parseWorkflow(agent, savedNodes, ctx = { toolsById: {}, agentsById: {} 
   const defaultModel = agent && agent.conversation_config && agent.conversation_config.agent
     && agent.conversation_config.agent.prompt && agent.conversation_config.agent.prompt.llm;
 
+  // Built-ins declared on the *agent* rather than on a node. `run_subagent` and
+  // `transfer_to_agent` live here on live agents, and reading only node-level
+  // declarations wrongly classified their calls as graph plumbing. An
+  // agent-level built-in is available to every node the agent owns, so it is
+  // merged into each.
+  const agentBuiltIns = nodeBuiltIns(agent);
+
   const ownerId = owner.agentId || (agent && agent.agent_id) || null;
   const ownerName = owner.agentName || (agent && agent.name) || null;
   const isPrimary = owner.isPrimary !== false;
@@ -614,6 +765,7 @@ function parseWorkflow(agent, savedNodes, ctx = { toolsById: {}, agentsById: {} 
       configModel: type === 'tool' || type === 'start' || type === 'end' ? null : nodeModel(d, defaultModel),
       prompt: nodePrompt(d),
       toolIds: nodeTools(d),
+      builtIns: Array.from(new Set([...agentBuiltIns, ...nodeBuiltIns(d)])),
       raw: d,
     };
   });
@@ -836,6 +988,7 @@ export function buildModel(bundle, opts = {}) {
 
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   const stats = new Map();
+  const toolStats = new Map();
 
   const statFor = (id) => {
     let s = stats.get(id);
@@ -889,6 +1042,15 @@ export function buildModel(bundle, opts = {}) {
     else if (!onBranch) offBranch += 1;
 
     const transcript = detail.transcript || [];
+    // A call's outcome lands on the *following* turn, joined by request_id
+    // (verified: 5,053 of 5,053 matched, offset always +1). Indexed up front so
+    // the join does not depend on that offset staying 1.
+    const resultsById = new Map();
+    for (const turn of transcript) {
+      for (const result of (turn.tool_results || [])) {
+        if (result && result.request_id) resultsById.set(result.request_id, result);
+      }
+    }
     const steps = [];
     let current = null;
     let convUsage = {};
@@ -914,6 +1076,15 @@ export function buildModel(bundle, opts = {}) {
       const rag = retrievedTokens(turn);
       if (rag > 0) { stat.retrieved += rag; stat.retrievedCalls += 1; }
       collectFitSignals(stat, turn, detail, tokens, hasLlm);
+
+      // Tool calls. Exactly one per turn on every window measured (5,053 of
+      // 5,053), so the turn's usage attributes to the call without splitting.
+      if (inScope && turn.tool_calls && turn.tool_calls.length) {
+        for (const call of turn.tool_calls) {
+          collectToolCall(toolStats, call, resultsById.get(call && call.request_id),
+            { nodeId, agentId: turnAgent, usage, tokens, hasLlm, convId: detail.conversation_id });
+        }
+      }
 
       if (hasLlm) {
         const cost = usageCost(usage);
@@ -1076,7 +1247,13 @@ export function buildModel(bundle, opts = {}) {
       nodeId: bare,
       agentId: parts.agentId,
       agentName: agentsById[parts.agentId] || null,
-      isPrimary: parts.agentId === primaryId,
+      // `isPrimary === false` is read across the app as "reached by a transfer,
+      // and its prompt and tools belong to that other agent". UNATTRIBUTED
+      // belongs to *no* agent, so claiming it is foreign is a specific and
+      // wrong statement: it put a dangling " · agent: " in the canvas tooltip
+      // (agentName and agentId are both null, and `h(null)` renders empty) and
+      // made it the only row any `isPrimary === false` filter returned.
+      isPrimary: id === UNATTRIBUTED ? true : parts.agentId === primaryId,
       type: id === UNATTRIBUTED ? 'unattributed' : 'override_agent',
       label: id === UNATTRIBUTED ? 'Unattributed turns'
         : (/^[a-z_]*_?[a-z0-9]{20,}$/i.test(bare) ? bare.slice(0, 5) + '…' + bare.slice(-6) : bare),
@@ -1211,6 +1388,9 @@ export function buildModel(bundle, opts = {}) {
   }).sort((a, b) => b.cost - a.cost);
 
   const windowTokens = usageTokens(hasCharging ? chargingUsage : windowUsage);
+  // What the per-turn walk actually saw. Equals the ledger's and the model
+  // mix's own sums by construction — all three read `windowUsage`.
+  const attributedTokens = usageTokens(windowUsage);
   const inSpend = usageInputCost(hasCharging ? chargingUsage : windowUsage);
   const outSpend = usageOutputCost(hasCharging ? chargingUsage : windowUsage);
 
@@ -1227,6 +1407,12 @@ export function buildModel(bundle, opts = {}) {
   }
 
   const fit = buildFit({ ledger, prompts, models, toolsById, graph, edges, agentsById });
+
+  const tools = buildTools({
+    toolStats, toolsById, nodeById, agentsById, scale, windowSpend,
+    graph, ledger, prompts,
+    conversationCount: inScope.length,
+  });
 
   const agentsInWindow = Array.from(new Set(conversations.flatMap(
     (c) => (c.detail.transcript || []).map(agentIdOf).filter(Boolean),
@@ -1251,6 +1437,7 @@ export function buildModel(bundle, opts = {}) {
     })).sort((a, b) => (b.isPrimary - a.isPrimary) || b.nodes - a.nodes),
     undeclaredAgents,
     fit,
+    tools,
     agentName: agent.name || opts.agentId || 'Agent',
     versionId: pinnedVersion,
     branchIds,
@@ -1283,8 +1470,21 @@ export function buildModel(bundle, opts = {}) {
       conversations: inScope.length,
       offVersion,
       offBranch,
+      // Billed tokens, from metadata.charging (§7.2). Not the same basis as the
+      // node ledger or the model mix, which sum per-turn llm_usage — exactly the
+      // two sources the cost reconciliation already bridges with `scale`. Token
+      // counts are NOT scaled, so the difference is reported rather than hidden:
+      // without it a tile reads 7.10M above a table that sums to 6.79M and
+      // neither says why.
       tin: windowTokens.input,
       tout: windowTokens.output,
+      // Per-turn input actually attributed to a node, and the billed remainder
+      // that is not. The cost counterparts are `turnsTotal` and
+      // `unattributedSpend`; these are the same quantities counted in tokens.
+      attributedTin: attributedTokens.input,
+      attributedTout: attributedTokens.output,
+      unattributedTin: Math.max(0, windowTokens.input - attributedTokens.input),
+      unattributedTout: Math.max(0, windowTokens.output - attributedTokens.output),
       cacheRead: windowTokens.cacheRead,
       freshInput: windowTokens.fresh,
       inSpend,
@@ -1769,7 +1969,232 @@ function rateOf(row, unit) {
   return blendedRate({ [row.model]: units }, INPUT_UNITS);
 }
 
-export function buildFit({ ledger, prompts, models, toolsById, edges, agents }) {
+export /**
+ * Tool ledger — SPEC §3c.
+ *
+ * One row per tool name actually invoked in the window. What makes this sound
+ * is that a turn carries at most one tool call (5,053 of 5,053 on every window
+ * measured), so the calling turn's usage attributes to the call without being
+ * split between rivals.
+ *
+ * The hard part is not the arithmetic, it is refusing to state a number the
+ * data does not support. `progress_workflow` shows ~15k input tokens per call;
+ * that is the node's whole prompt on a turn that happened to call it, not the
+ * tool's cost. So the tool's own token footprint is reported in three parts
+ * that each mean something, and the calling turn's spend is reported separately
+ * and labelled as exposure:
+ *
+ *   paramsOut      measured   output tokens generated for the call itself
+ *   ~schemaTokens  estimated  the JSON schema, resident on every call to a node
+ *                             it is attached to, whether or not the tool fires
+ *   ~resultTokens  estimated  the payload injected as input on the next call,
+ *                             sized from its character count (§7.12) — one real
+ *                             window holds 26.1M characters of these and
+ *                             tokenizing that in the browser buys nothing
+ *   turnSpend      billed     money on turns that called it. Exact, and *not*
+ *                             caused by the tool. Reach, not causation.
+ */
+function buildTools({
+  toolStats, toolsById, nodeById, agentsById, scale, windowSpend, conversationCount,
+  graph, ledger, prompts,
+}) {
+  // Every built-in any node switched on. One flat set: a call carries no node
+  // id we could scope it to, and a name declared anywhere in the reachable
+  // graph is a name someone chose.
+  const declaredBuiltIns = new Set();
+  for (const node of (graph && graph.nodes) || []) {
+    for (const name of (node.builtIns || [])) declaredBuiltIns.add(name);
+  }
+  // Tool calls name a tool; tool documents are keyed by id. Index the cached
+  // documents by their authored name so a row can find its schema.
+  const docByName = new Map();
+  for (const doc of Object.values(toolsById || {})) {
+    const config = (doc && (doc.tool_config || doc)) || {};
+    if (typeof config.name === 'string' && config.name) docByName.set(config.name, config);
+  }
+
+  // What the *config* attaches, so it can be reconciled against what the
+  // traffic *invoked*. Keyed by tool name, because a call only names a tool.
+  const callsByNode = new Map((ledger || []).map((r) => [r.id, r.calls || 0]));
+  const auditByNode = new Map(((prompts && prompts.audits) || []).map((a) => [a.id, a]));
+  const attachedByName = new Map();
+  const unresolvedIds = new Map();
+  const attach = (name, node, viaId) => {
+    if (!attachedByName.has(name)) attachedByName.set(name, { name, nodes: [], viaId });
+    attachedByName.get(name).nodes.push({
+      id: node.id,
+      label: node.label,
+      agentId: node.agentId,
+      agentName: node.agentName || agentsById[node.agentId] || null,
+      calls: callsByNode.get(node.id) || 0,
+      inputPrice: (auditByNode.get(node.id) || {}).effectiveInputPrice || 0,
+    });
+  };
+  for (const node of (graph && graph.nodes) || []) {
+    for (const id of (node.toolIds || [])) {
+      const doc = (toolsById || {})[id];
+      const config = doc && (doc.tool_config || doc);
+      if (config && config.name) attach(config.name, node, id);
+      else {
+        // No document for this id: the name is unknowable, so the id is carried
+        // as-is rather than inventing a label for it.
+        if (!unresolvedIds.has(id)) unresolvedIds.set(id, []);
+        unresolvedIds.get(id).push({ id: node.id, label: node.label, agentId: node.agentId });
+      }
+    }
+    // A declared built-in is attached by name — there is no id to resolve.
+    for (const name of (node.builtIns || [])) attach(name, node, null);
+  }
+
+  const rows = [];
+  let plumbingCalls = 0;
+  let plumbingSpend = 0;
+  let plumbingNames = 0;
+
+  for (const stat of toolStats.values()) {
+    const types = Array.from(stat.types).filter(Boolean);
+    // Decided with the user: plumbing is excluded from the screen, but counted,
+    // because 4,536 of 5,053 calls silently vanishing would itself mislead.
+    if (types.length && types.every((t) => isPlumbingTool(t, stat.name, declaredBuiltIns))) {
+      plumbingNames += 1;
+      plumbingCalls += stat.calls;
+      plumbingSpend += stat.turnCost * scale;
+      continue;
+    }
+
+    const config = docByName.get(stat.name) || null;
+    const latencies = stat.latencies.slice().sort((a, b) => a - b);
+    const convCount = stat.convIds.size;
+    rows.push({
+      name: stat.name,
+      type: types.length === 1 ? types[0] : (types.join(' + ') || 'unknown'),
+      calls: stat.calls,
+      conversations: convCount,
+      reach: conversationCount ? convCount / conversationCount : 0,
+      callsPerConv: conversationCount ? stat.calls / conversationCount : 0,
+      // When it is used at all, how often — the number that says whether a tool
+      // is called once or hammered in a loop.
+      callsWhenUsed: convCount ? stat.calls / convCount : 0,
+      errors: stat.errors,
+      errorRate: stat.calls ? stat.errors / stat.calls : 0,
+      errorTypes: Array.from(stat.errorTypes.entries())
+        .map(([kind, count]) => ({ kind, count }))
+        .sort((a, b) => b.count - a.count),
+      blocked: stat.blocked,
+      p50: latencies.length ? quantile(latencies, 0.5) : null,
+      p95: latencies.length ? quantile(latencies, 0.95) : null,
+      maxLatency: latencies.length ? latencies[latencies.length - 1] : null,
+      paramsOut: stat.paramsOut,
+      paramChars: stat.paramChars,
+      resultChars: stat.resultChars,
+      maxResultChars: stat.maxResultChars,
+      resultTokens: approxTokensFromChars(stat.resultChars),
+      // Per-call averages. Totals say what the window cost; averages are what
+      // compares across tools, and a tool called once should not look cheap
+      // beside one called eighty times. Derived from the totals so the column
+      // and its sub-line can never disagree.
+      paramsOutPerCall: stat.calls ? stat.paramsOut / stat.calls : 0,
+      paramCharsPerCall: stat.calls ? stat.paramChars / stat.calls : 0,
+      resultTokensPerCall: stat.calls ? approxTokensFromChars(stat.resultChars) / stat.calls : 0,
+      resultCharsPerCall: stat.calls ? stat.resultChars / stat.calls : 0,
+      // No cached document means no schema to size. Null, never zero — zero
+      // would read as "this tool has no schema", which is a different claim.
+      schemaTokens: config ? countTokens(JSON.stringify(config)) : null,
+      schemaKnown: !!config,
+      description: (config && (config.description || '')) || '',
+      attached: attachedByName.has(stat.name),
+      attachedNodes: (attachedByName.get(stat.name) || { nodes: [] }).nodes,
+      turnIn: stat.turnIn,
+      turnSpend: stat.turnCost * scale,
+      turnShare: windowSpend ? (stat.turnCost * scale) / windowSpend : 0,
+      callsWithoutUsage: stat.callsWithoutUsage,
+      nodes: Array.from(stat.nodeIds).map((id) => {
+        const node = nodeById.get(id);
+        return { id, label: (node && node.label) || splitKey(id).nodeId };
+      }).sort((a, b) => String(a.label).localeCompare(String(b.label))),
+      agents: Array.from(stat.agentIds).map((id) => ({ id, name: agentsById[id] || id })),
+      variables: Array.from(stat.variables).sort(),
+    });
+  }
+
+  rows.sort((a, b) => b.calls - a.calls);
+
+  // ── attached vs invoked ────────────────────────────────────────────
+  // Two failure modes, opposite directions, both worth naming.
+  const invokedNames = new Set(toolStats.keys());
+
+  // Attached and never called: its schema is resident in the prompt of every
+  // call to that node, paid for on each one, and earns nothing. The tokens are
+  // estimated (§7.12); the price is the node's own measured input rate.
+  const unused = [];
+  for (const entry of attachedByName.values()) {
+    if (invokedNames.has(entry.name)) continue;
+    const doc = Object.values(toolsById || {})
+      .find((d) => ((d && (d.tool_config || d)) || {}).name === entry.name);
+    const config = doc && (doc.tool_config || doc);
+    const schemaTokens = config ? countTokens(JSON.stringify(config)) : null;
+    const calls = sum(entry.nodes.map((n) => n.calls));
+    unused.push({
+      name: entry.name,
+      builtIn: entry.viaId == null,
+      schemaTokens,
+      nodes: entry.nodes,
+      calls,
+      residentTokens: schemaTokens == null ? null : schemaTokens * calls,
+      cost: schemaTokens == null ? null : sum(entry.nodes.map(
+        (n) => (schemaTokens * n.calls / 1e6) * n.inputPrice,
+      )),
+    });
+  }
+  unused.sort((a, b) => (b.cost || 0) - (a.cost || 0) || (b.calls - a.calls));
+
+  // Called but attached nowhere in the cached config: the traffic ran a
+  // configuration we no longer hold. Diagnostic, not a cost finding — it is why
+  // a schema column can read "—" for a tool that is plainly in use.
+  const orphans = rows.filter((r) => !r.attached).map((r) => r.name);
+
+  const totals = {
+    tools: rows.length,
+    calls: sum(rows.map((r) => r.calls)),
+    errors: sum(rows.map((r) => r.errors)),
+    turnSpend: sum(rows.map((r) => r.turnSpend)),
+    resultChars: sum(rows.map((r) => r.resultChars)),
+    resultTokens: sum(rows.map((r) => r.resultTokens)),
+    paramsOut: sum(rows.map((r) => r.paramsOut)),
+    paramChars: sum(rows.map((r) => r.paramChars)),
+    callsWithoutUsage: sum(rows.map((r) => r.callsWithoutUsage)),
+    schemaUnknown: rows.filter((r) => !r.schemaKnown).length,
+    conversationCount,
+  };
+  totals.errorRate = totals.calls ? totals.errors / totals.calls : 0;
+  totals.paramsOutPerCall = totals.calls ? totals.paramsOut / totals.calls : 0;
+  totals.resultTokensPerCall = totals.calls ? totals.resultTokens / totals.calls : 0;
+  totals.resultCharsPerCall = totals.calls ? totals.resultChars / totals.calls : 0;
+  // The chattiest tool by average, not by total — a single 60k-character reply
+  // is a different problem from eighty small ones.
+  const byAvgResult = rows.slice().sort((a, b) => b.resultCharsPerCall - a.resultCharsPerCall)[0];
+  totals.chattiest = byAvgResult ? byAvgResult.name : null;
+  totals.chattiestPerCall = byAvgResult ? byAvgResult.resultCharsPerCall : 0;
+  totals.turnShare = windowSpend ? totals.turnSpend / windowSpend : 0;
+  totals.callsPerConv = conversationCount ? totals.calls / conversationCount : 0;
+  const allLatencies = rows.flatMap((r) => (r.p95 == null ? [] : [r.p95]));
+  totals.worstP95 = allLatencies.length ? Math.max(...allLatencies) : null;
+
+  totals.unusedCost = sum(unused.map((u) => u.cost || 0));
+  totals.orphans = orphans.length;
+
+  return {
+    rows,
+    totals,
+    unused,
+    orphans,
+    declaredBuiltIns: Array.from(declaredBuiltIns).sort(),
+    unresolvedIds: Array.from(unresolvedIds.entries()).map(([id, nodes]) => ({ id, nodes })),
+    excluded: { calls: plumbingCalls, spend: plumbingSpend, names: plumbingNames },
+  };
+}
+
+function buildFit({ ledger, prompts, models, toolsById, edges, agents }) {
   const auditById = new Map(prompts.audits.map((a) => [a.id, a]));
   const llmEdgesFrom = new Map();
   for (const edge of edges) {

@@ -21,6 +21,7 @@
 
 import { reportAnalytics } from './analytics.js';
 import { reportPrompts } from './prompts.js';
+import { reportTools } from './tools.js';
 import { tokenizerLabel, tokenizerSource } from '../tokenizer.js';
 import { h, int, longDate, median, pct, usd } from '../util.js';
 
@@ -147,6 +148,7 @@ export function renderReport(model, state) {
       </div>
       ${cover(model, state)}
       ${reportAnalytics(model, state)}
+      ${reportTools(model, state)}
       ${reportPrompts(model, state)}
       ${appendix()}
     </div>`;

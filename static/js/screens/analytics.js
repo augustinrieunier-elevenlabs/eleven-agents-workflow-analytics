@@ -20,7 +20,8 @@ function tiles(model) {
         ? 'previous window not cached — sync it to get a trend'
         : signedPct(model.trend) + ' vs previous window'}</div></div>
     <div class="tile"><div class="tile__k">tokens</div><div class="tile__v">${num(tokens)}</div>
-      <div class="tile__note">${num(t.tin)} in · ${num(t.tout)} out</div></div>
+      <div class="tile__note">billed · ${num(t.tin)} in · ${num(t.tout)} out${t.unattributedTin > 0
+        ? ` · ${num(t.attributedTin)} of the input is attributed to a node` : ''}</div></div>
     <div class="tile"><div class="tile__k">cost / 1k tokens</div>
       <div class="tile__v">${tokens ? usd6(t.windowSpend / (tokens / 1000)) : '—'}</div>
       <div class="tile__note">blended across ${model.models.length} model${model.models.length === 1 ? '' : 's'}</div></div>
@@ -93,8 +94,23 @@ function driversCard(model) {
   </div>`;
 }
 
+/**
+ * Model mix.
+ *
+ * Token and call columns are summed from `transcript[].llm_usage`, which is a
+ * different basis from the window's `tokens` tile — that one reports the billed
+ * figure out of `metadata.charging` (§7.2). The two differ by the generation no
+ * turn recorded, so the basis is stated here rather than left for a reader to
+ * discover by adding the column up.
+ */
 function modelTable(model, compact) {
   if (!model.models.length) return '<div class="empty">No model usage in this window.</div>';
+  const t = model.totals;
+  const basis = t.unattributedTin > 0
+    ? `<div class="srcnote" style="padding:6px 5px 2px">Summed per turn: ${num(t.attributedTin)} input
+       across these models, against ${num(t.tin)} billed. The ${num(t.unattributedTin)}-token
+       difference is generation begun and then abandoned, which carries no model attribution.</div>`
+    : '';
   return `<table class="tbl tbl--tight">
     <thead><tr><th>Model</th><th class="num">Calls</th><th class="num">Tok in</th><th class="num">Tok out</th>
       ${compact ? '' : '<th class="num">$/1M in</th><th class="num">$/1M out</th>'}<th class="num">Spend</th></tr></thead>
@@ -104,7 +120,7 @@ function modelTable(model, compact) {
         <td class="num">${int(m.calls)}</td><td class="num">${num(m.tin)}</td><td class="num">${num(m.tout)}</td>
         ${compact ? '' : `<td class="num muted">${rate1m(m.priceIn)}</td><td class="num muted">${rate1m(m.priceOut)}</td>`}
         <td class="num" style="font-weight:500">${usd(m.cost)}</td></tr>`).join('')}
-    </tbody></table>`;
+    </tbody></table>${basis}`;
 }
 
 /** Format one input of a lever's derivation according to its kind. */
@@ -243,7 +259,7 @@ export function reportAnalytics(model, state) {
       <h2>Where the money goes</h2>
       <div class="split">
         <div class="card"><div class="card__head"><h3>Model mix</h3>
-          <div class="sub">where the money actually goes</div></div>
+          <div class="sub">measured per turn · where the money actually goes</div></div>
           <div class="card__body" style="padding:4px 8px">${modelTable(model, false)}</div>
           <div class="card__foot"><span>Prices are the ones the API returned with these conversations, so they
             already reflect the workspace tier, burst status and any dev discount.</span></div></div>
@@ -254,6 +270,31 @@ export function reportAnalytics(model, state) {
       <h2>Node spend by day</h2>
       ${nodeDayLedger(model, state)}
     </section>`;
+}
+
+/**
+ * Analytics panel for the Overview: the screen's tiles, the daily bars, and the
+ * model mix. All three are the screen's own renderers, so nothing can drift.
+ *
+ * `modelTable` is called in its compact form — the overview does not need the
+ * per-1M rate columns, which are the detail you go to the screen for.
+ */
+export function overviewAnalytics(model, state) {
+  return `
+    ${tiles(model)}
+    <div class="split" style="margin-top:12px">
+      ${dailyCard(model)}
+      <div class="card">
+        <div class="card__head"><h3>Model mix</h3>
+          <div class="sub">measured per turn · where the money actually goes</div>
+          <div class="right"><button class="btn btn--sm" data-act="screen" data-id="analytics">Open analytics →</button></div>
+        </div>
+        <div class="card__body" style="padding:4px 8px;overflow-x:auto">${modelTable(model, true)}</div>
+        <div class="card__foot"><span>Prices are the ones the API returned with these
+          conversations, so they already reflect the workspace tier, burst status and any dev
+          discount.</span></div>
+      </div>
+    </div>`;
 }
 
 export function renderAnalytics(model, state) {
@@ -273,7 +314,8 @@ export function renderAnalytics(model, state) {
   if (state.analyticsView === 'ledger') {
     return head + nodeDayLedger(model, state) + `
       <div class="grid grid-2" style="margin-top:12px">
-        <div class="card"><div class="card__head"><h3>Model mix</h3></div>
+        <div class="card"><div class="card__head"><h3>Model mix</h3>
+          <div class="sub">measured per turn</div></div>
           <div class="card__body" style="padding:4px 8px">${modelTable(model, true)}</div></div>
         ${outliers(model)}
       </div>`;
@@ -283,7 +325,7 @@ export function renderAnalytics(model, state) {
     <div class="split" style="margin-top:12px">${dailyCard(model)}${driversCard(model)}</div>
     <div class="split" style="margin-top:12px">
       <div class="card"><div class="card__head"><h3>Model mix</h3>
-        <div class="sub">where the money actually goes</div></div>
+        <div class="sub">measured per turn · where the money actually goes</div></div>
         <div class="card__body" style="padding:4px 8px;overflow-x:auto">${modelTable(model, false)}</div>
         <div class="card__foot"><span>Prices are the ones the API returned with these conversations, so they already
           reflect the workspace tier, burst status and any dev discount.</span></div></div>

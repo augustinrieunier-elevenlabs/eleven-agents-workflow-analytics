@@ -9,7 +9,9 @@ import { renderAnalytics } from './screens/analytics.js';
 import { renderConvDrawer, renderNodeDrawer } from './screens/drawers.js';
 import { renderFit } from './screens/fit.js';
 import { renderPrompts } from './screens/prompts.js';
+import { renderOverview } from './screens/overview.js';
 import { renderReport } from './screens/report.js';
+import { TOOL_COLUMNS, renderTools } from './screens/tools.js';
 import { LEDGER_COLUMNS, encodingList, renderWorkflow } from './screens/workflow.js';
 import { CONV_COLUMNS, renderConversations } from './screens/conversations.js';
 import {
@@ -21,9 +23,11 @@ import {
 } from './util.js';
 
 const SCREENS = {
+  overview: 'Overview',
   workflow: 'Workflow cost',
   prompts: 'Prompt audit',
   fit: 'Model fit (wip, beta)',
+  tools: 'Tool usage',
   conversations: 'Conversations',
   analytics: 'Token analytics',
   report: 'Cost report',
@@ -41,8 +45,17 @@ const state = {
   keyError: null,
   savedKeys: [],
   activeAlias: null,
+  // Which saved key is *selected in the picker*, and separately what alias the
+  // save row would write under. One field served both, which is why choosing
+  // from the list left the list showing its placeholder: the `<option selected>`
+  // was bound to `activeAlias` while picking wrote the draft, so the select
+  // snapped back while the save row filled in.
+  aliasPick: null,
   aliasDraft: '',
   keyBackend: 'memory',
+  // Set only by the demo action. The demo writes a window without a key, so it
+  // is the one path besides connecting that opens steps 2 and 3.
+  demoSeeded: false,
   loadError: null,
   busy: false,
 
@@ -68,7 +81,9 @@ const state = {
   model: null,
   previousSpend: null,
 
-  screen: 'workflow',
+  // The landing screen. Workflow was the default before the Overview existed;
+  // arriving on a summary rather than on a 75-node canvas is the point of it.
+  screen: 'overview',
   encoding: 'heat',
   // Which Analytics layout is shown. Named apart from `layout` on purpose: that
   // one holds the saved graph positions, and the two shared a field. The
@@ -81,6 +96,9 @@ const state = {
   convPage: 1,
   ledgerSort: { key: 'rank', dir: 'asc' },
   ledgerPage: 1,
+  toolSort: { key: 'calls', dir: 'desc' },
+  toolPage: 1,
+  toolOpen: null,
   promptSort: { key: 'promptCost', dir: 'desc' },
   node: null,
   conv: null,
@@ -103,9 +121,11 @@ function toast(message, ms = 4200) {
 function sidebar() {
   const model = state.model;
   const nav = [
+    ['overview', 'Overview', ''],
     ['workflow', 'Workflow', model ? model.ledger.length : ''],
     ['prompts', 'Prompts', model ? model.prompts.audits.length : ''],
     ['fit', 'Model fit (wip, beta)', model ? (model.fit.totals.headroom + model.fit.totals.strained) || '' : ''],
+    ['tools', 'Tools', model ? model.tools.totals.tools || '' : ''],
     ['conversations', 'Conversations', model ? int(model.totals.conversations) : ''],
     ['analytics', 'Analytics', model ? model.days.length + 'd' : ''],
   ];
@@ -140,6 +160,50 @@ function sidebar() {
         title="A printable cost report: analytics and the prompt audit, with provenance. No transcripts or conversation ids.">Export report</button>
       <button class="btn btn--ghost btn--sm" data-act="reset" style="margin-top:6px;justify-content:flex-start">Change connection</button>
     </div>`;
+}
+
+/**
+ * Drop everything downstream of the key.
+ *
+ * A different key is a different account: its agent ids, branches, versions and
+ * cached window have nothing to do with the previous one. Before this, only
+ * `set-region` cleared any of it — pasting a replacement key kept the
+ * previously selected agent, its branches, its versions, its dependency walk
+ * and the built model, and `use-saved-key` only cleared them when the alias
+ * happened to carry a *different* region, so switching between two aliases in
+ * one region silently kept the old workspace's selection.
+ *
+ * Clears selection and derived data only. The caller owns region, key mask and
+ * api base, because each entry path resolves those differently.
+ */
+function resetWorkspace() {
+  state.agents = [];
+  state.agentId = null;
+  state.agentQuery = '';
+  state.branches = [];
+  state.branchIds = [];
+  state.branchTotal = 0;
+  state.versions = [];
+  state.versionId = null;
+  state.versionLabel = null;
+  state.versionTouched = false;
+  state.dependencies = null;
+  state.depsLoading = false;
+  state.bundle = null;
+  state.model = null;
+  state.previousSpend = null;
+  state.layout = null;
+  state.layoutSaved = false;
+  state.job = null;
+  state.loadError = null;
+  state.node = null;
+  state.conv = null;
+  state.convPage = 1;
+  state.ledgerPage = 1;
+  state.toolPage = 1;
+  state.toolOpen = null;
+  // Demo data belongs to the demo region; a key change moves off it.
+  state.demoSeeded = false;
 }
 
 /** Short label for the branch selection, for the sidebar and topbar. */
@@ -198,8 +262,10 @@ function page() {
   // The report is its own screen: one long static document, no chrome, printed
   // by the @media print block rather than by a second rendering path.
   if (state.screen === 'report') return renderReport(model, ctx);
+  if (state.screen === 'overview') return warnings() + renderOverview(model, ctx);
   if (state.screen === 'prompts') return warnings() + renderPrompts(model, ctx);
   if (state.screen === 'fit') return warnings() + renderFit(model, ctx);
+  if (state.screen === 'tools') return warnings() + renderTools(model, ctx);
   if (state.screen === 'conversations') return warnings() + renderConversations(model, ctx);
   if (state.screen === 'analytics') return warnings() + renderAnalytics(model, ctx);
   return warnings() + renderWorkflow(model, ctx);
@@ -235,6 +301,36 @@ function patchAgentFilter() {
   if (clear) clear.hidden = !state.agentQuery;
 }
 
+/**
+ * Put the viewport back at the top when the view changes.
+ *
+ * The document is the scroll container — nothing in the shell sets `overflow` —
+ * so the browser keeps whatever offset the previous view had. The setup screen
+ * is `min-height:100vh` and taller still once branches and dependencies are
+ * listed, so reaching Retrieve means scrolling down; the phase then flips to
+ * `ready` and the Overview renders with the viewport still halfway down it.
+ * Moving between screens had the same effect in the other direction.
+ *
+ * Keyed on phase and screen **only**. Every other re-render must leave the
+ * viewport alone: typing in the agent filter, sorting a column, paging a table,
+ * opening or closing a drawer, dragging a node. Yanking the page to the top on
+ * any of those would be a worse bug than the one this fixes.
+ */
+let lastView = null;
+
+function resetScroll() {
+  const view = state.phase + ':' + state.screen;
+  if (view === lastView) return;
+  lastView = view;
+  // Guarded: this is a convenience, and `render()` runs inside the boot
+  // sequence. A host without `scrollTo` — a test harness, an embedded view —
+  // must still get a rendered page rather than a TypeError that takes the whole
+  // app down before the first paint.
+  if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
+}
+
 function render() {
   const setupEl = $('#setup');
   const sideEl = $('#side');
@@ -246,6 +342,7 @@ function render() {
     mainEl.hidden = true;
     setupEl.innerHTML = renderSetup(state);
     $('#overlay').innerHTML = '';
+    resetScroll();
     return;
   }
 
@@ -268,6 +365,9 @@ function render() {
   } else {
     detachGraph();
   }
+
+  // After the new markup is in the DOM, so the document has its new height.
+  resetScroll();
 }
 
 /** The branch a layout belongs to — node sets differ between branches. */
@@ -562,6 +662,7 @@ async function loadWindow() {
   // A fresh window invalidates any page position in either table.
   state.convPage = 1;
   state.ledgerPage = 1;
+  state.toolPage = 1;
   await loadObservedVersions();
 }
 
@@ -634,7 +735,7 @@ const actions = {
   },
 
   'set-alias': (el) => { state.aliasDraft = el.value; return false; },
-  'pick-saved-key': (el) => { state.aliasDraft = el.value; },
+  'pick-saved-key': (el) => { state.aliasPick = el.value || null; },
 
   'save-key': async () => {
     state.keyError = null;
@@ -643,6 +744,8 @@ const actions = {
     state.busy = true; render();
     try {
       const res = await api.saveKey(alias, (state.apiKeyDraft || '').trim(), state.region);
+      // Saving also activates the key, so the same reset applies.
+      resetWorkspace();
       state.savedKeys = res.keys || [];
       state.keyBackend = res.backend || state.keyBackend;
       state.activeAlias = alias;
@@ -657,27 +760,24 @@ const actions = {
   },
 
   'use-saved-key': async () => {
-    const alias = (state.aliasDraft || state.activeAlias || '').trim();
+    const alias = (state.aliasPick || state.activeAlias || '').trim();
     if (!alias) return;
     state.keyError = null;
     state.busy = true; render();
     try {
       const res = await api.activateKey(alias);
+      // Unconditionally: two aliases in the *same* region are still two
+      // accounts with two sets of agent ids. Gating this on a region change
+      // kept the previous selection whenever the regions happened to match.
+      resetWorkspace();
       state.activeAlias = alias;
+      state.aliasPick = alias;
       state.keyMask = res.key_mask;
       state.hasKey = true;
       // A saved key carries its own region: switching key switches workspace.
       if (res.region && res.region !== state.region) {
         state.region = res.region;
         api.setRegion(state.region);
-        state.agents = [];
-        state.agentId = null;
-        state.branches = [];
-        state.branchIds = [];
-        state.versions = [];
-        state.versionId = null;
-        state.model = null;
-        state.bundle = null;
       }
       state.apiBase = res.api_base || state.apiBase;
       await loadAgents(true);
@@ -688,13 +788,14 @@ const actions = {
   },
 
   'forget-saved-key': async () => {
-    const alias = (state.aliasDraft || state.activeAlias || '').trim();
+    const alias = (state.aliasPick || state.activeAlias || '').trim();
     if (!alias) return;
     try {
       const res = await api.forgetKey(alias);
       state.savedKeys = res.keys || [];
       if (state.activeAlias === alias) state.activeAlias = null;
-      state.aliasDraft = '';
+      // Clears the selection, not the save row's alias input.
+      state.aliasPick = null;
       toast(`Forgot “${alias}”.`);
     } catch (e) {
       state.keyError = { status: e.status, message: e.message };
@@ -713,15 +814,10 @@ const actions = {
     state.keyError = null;
     state.loadError = null;
     state.activeAlias = null;
-    state.agents = [];
-    state.agentId = null;
-    state.branches = [];
-    state.branchIds = [];
-    state.versions = [];
-    state.versionId = null;
-    state.versionTouched = false;
-    state.model = null;
-    state.bundle = null;
+    state.aliasPick = null;
+    // Was an inline list that had drifted: it never cleared the dependency walk
+    // or the saved layout.
+    resetWorkspace();
     await refreshSession();
     await loadAgents();
   },
@@ -732,6 +828,10 @@ const actions = {
     state.busy = true; render();
     try {
       const res = await api.postKey(state.apiKeyDraft.trim(), state.region);
+      // The key just changed, so nothing the previous one selected still applies.
+      resetWorkspace();
+      state.activeAlias = null;
+      state.aliasPick = null;
       state.hasKey = true;
       state.keyMask = res.key_mask;
       state.region = res.region || state.region;
@@ -751,6 +851,7 @@ const actions = {
     state.busy = true; render();
     try {
       const res = await api.seedDemo(14, 44);
+      state.demoSeeded = true;
       state.agentId = res.agent_id;
       state.from = res.from;
       state.to = res.to;
@@ -826,7 +927,10 @@ const actions = {
   },
 
   'retrieve': () => retrieve(),
-  'reset': () => { state.phase = 'setup'; state.job = null; state.node = null; state.conv = null; },
+  'reset': () => {
+    state.phase = 'setup'; state.job = null; state.node = null; state.conv = null;
+    state.screen = 'overview';
+  },
 
   'screen': (el) => { state.screen = el.dataset.id; state.node = null; state.conv = null; },
 
@@ -858,6 +962,12 @@ const actions = {
     state.ledgerPage = 1;
   },
   'ledger-page': (el) => { state.ledgerPage = Number(el.dataset.id) || 1; },
+  'tool-sort': (el) => {
+    state.toolSort = nextSort(TOOL_COLUMNS, state.toolSort, el.dataset.id);
+    state.toolPage = 1;
+  },
+  'tool-page': (el) => { state.toolPage = Number(el.dataset.id) || 1; },
+  'tool-open': (el) => { state.toolOpen = state.toolOpen === el.dataset.id ? null : el.dataset.id; },
 
   'fit-toggle': (el) => { state.fitOpen = state.fitOpen === el.dataset.id ? null : el.dataset.id; },
   'fit-agent': (el) => { state.fitAgent = el.dataset.id || null; state.fitOpen = null; },
@@ -922,7 +1032,11 @@ document.addEventListener('keydown', (event) => {
   render();
   await refreshSession();
   await loadSavedKeys();
-  await loadAgents();
+  // Only once something is connected. `/api/agents` is a cache read, so calling
+  // it cold returns whatever a previous sync left on disk and pulls a whole
+  // agent list into memory before the user has chosen anything. Every path that
+  // connects a key calls loadAgents itself.
+  if (state.hasKey) await loadAgents();
   render();
   // A real tokenizer improves the config-side estimates on the Prompts screen.
   upgrade().then((ok) => { if (ok && state.phase === 'ready') { rebuild(); render(); } });

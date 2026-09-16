@@ -551,14 +551,25 @@ def get_window():
         else:
             details.append(detail)
 
+    # Keyed by the id the document reports, NOT by its filename. `store.safe()`
+    # replaces ":" with "_" to make a legal filename, so an MCP tool the graph
+    # references as `mcp:server:tool` is stored as `mcp_server_tool.json`. Keying
+    # by the filename stem made every MCP tool unresolvable by id — all 5 in one
+    # real workspace — which silently dropped their schemas from prompt
+    # composition, their names from node labels, and their rows from the fit
+    # screen, while raising a "schema missing from the cache" warning for
+    # documents that were sitting right there.
     tools = {}
     tools_dir = os.path.join(DATA_DIR, store.ns(region), "tools")
     if os.path.isdir(tools_dir):
         for name in sorted(os.listdir(tools_dir)):
-            if name.endswith(".json"):
-                doc = store.read(os.path.join(store.ns(region), "tools", name))
-                if doc is not None:
-                    tools[name[:-5]] = doc
+            if not name.endswith(".json"):
+                continue
+            doc = store.read(os.path.join(store.ns(region), "tools", name))
+            if doc is None:
+                continue
+            real_id = doc.get("id") if isinstance(doc, dict) else None
+            tools[real_id if isinstance(real_id, str) and real_id else name[:-5]] = doc
 
     meta = store.meta()
     return jsonify({

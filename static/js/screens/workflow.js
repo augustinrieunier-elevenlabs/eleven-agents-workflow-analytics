@@ -151,7 +151,13 @@ function kpis(model, state) {
   const t = model.totals;
   const days = daysBetween(state.from, state.to);
   const convs = t.conversations || 1;
-  const slowest = model.ledger.filter((r) => r.p95 != null).sort((a, b) => b.p95 - a.p95)[0];
+  // UNATTRIBUTED collects the latency of turns with no node, and on a window
+  // where those dominate it won this comparison — the tile then read "slowest
+  // node Unattributed turns", naming as a node the one row that by definition
+  // is not one.
+  const slowest = model.ledger
+    .filter((r) => r.id !== UNATTRIBUTED && r.p95 != null)
+    .sort((a, b) => b.p95 - a.p95)[0];
   const ratio = t.tout ? (t.tin / t.tout).toFixed(1) + '×' : '—';
 
   return `<div class="grid grid-5">
@@ -168,7 +174,10 @@ function kpis(model, state) {
     <div class="tile">
       <div class="tile__k">tokens in / out</div>
       <div class="tile__v">${num(t.tin)}<small> / ${num(t.tout)}</small></div>
-      <div class="tile__note">${ratio} read per written · ${pct(t.tin ? t.cacheRead / t.tin : 0)} of input from cache</div>
+      <div class="tile__note">billed · ${ratio} read per written ·
+        ${pct(t.tin ? t.cacheRead / t.tin : 0)} of input from cache${t.unattributedTin > 0
+          ? ` · ${num(t.attributedTin)} attributed to nodes, ${num(t.unattributedTin)} begun and abandoned`
+          : ''}</div>
     </div>
     <div class="tile">
       <div class="tile__k">llm calls</div>
@@ -256,6 +265,73 @@ function ledgerTable(model, state) {
     <span class="spacer"></span>
     ${pager(info, 'ledger-page')}
   </div>`;
+}
+
+/** How many rows each overview panel shows. */
+const OVERVIEW_TOP = 5;
+
+/**
+ * Workflow panel for the Overview.
+ *
+ * The same `kpis()` the screen uses, plus the highest-spending nodes. The table
+ * is a compact re-layout rather than `ledgerTable` — that one paginates and
+ * carries ten columns — but it reads the same ledger fields, so the figures
+ * cannot differ from the screen's.
+ *
+ * `UNATTRIBUTED` is excluded from the ranking and stated separately. It is
+ * billed spend with no node behind it, so listing it among nodes would put "no
+ * node" at the top of a list of nodes; its share varies enormously between
+ * windows, which is exactly why it is named rather than folded in.
+ */
+export function overviewWorkflow(model, state) {
+  const priced = model.ledger.filter((r) => r.id !== UNATTRIBUTED);
+  const top = priced.slice(0, OVERVIEW_TOP);
+  const t = model.totals;
+  const topSpend = top.reduce((a, r) => a + r.cost, 0);
+  const tail = priced.length - top.length;
+  const max = Math.max(1e-9, ...top.map((r) => r.cost));
+
+  return `
+    ${kpis(model, state)}
+    <div class="card" style="margin-top:12px">
+      <div class="card__head"><h3>Highest-spending nodes</h3>
+        <div class="sub">top ${top.length} of ${int(priced.length)} by spend</div>
+        <div class="right"><button class="btn btn--sm" data-act="screen" data-id="workflow">Open workflow →</button></div>
+      </div>
+      <div class="card__body" style="padding:4px 8px;overflow-x:auto">
+        ${top.length ? `<table class="tbl tbl--tight">
+          <thead><tr><th class="rank">#</th><th>Node</th><th>Agent</th><th>Model</th>
+            <th class="num">Calls</th><th style="width:150px">Share</th><th class="num">Spend</th></tr></thead>
+          <tbody>${top.map((r, i) => `
+            <tr class="is-click" data-act="open-node" data-id="${h(r.id)}">
+              <td class="rank">${i + 1}</td>
+              <td><div class="row" style="gap:7px">
+                <div class="pm ${h(r.pmCls)}">${h(r.ini)}</div>
+                <span style="font-weight:500">${h(r.label)}</span>
+              </div></td>
+              <td class="small">${r.isPrimary === false
+                ? `<span class="badge badge--warn mono">${h(r.agentName || r.agentId)}</span>`
+                : '<span class="muted">this agent</span>'}</td>
+              <td class="mono small muted">${h(r.model || '—')}</td>
+              <td class="num">${int(r.calls)}</td>
+              <td><div class="bartrack"><i class="bar"
+                style="width:${((r.cost / max) * 100).toFixed(0)}%;background:${barBg(r.cost / max)}"></i></div></td>
+              <td class="num" style="font-weight:500">${r.cost ? usd(r.cost) : '—'}</td>
+            </tr>`).join('')}</tbody>
+        </table>` : '<div class="empty">No node in this window carries priced traffic.</div>'}
+      </div>
+      <div class="card__foot"><span>${top.length
+        ? `These ${top.length} carry ${pct(t.windowSpend ? topSpend / t.windowSpend : 0)} of window spend`
+          + (tail > 0 ? `; the other ${int(tail)} node${tail === 1 ? '' : 's'} carry `
+            + `${pct(t.windowSpend ? (t.windowSpend - t.unattributedSpend - topSpend) / t.windowSpend : 0)}` : '')
+          + '.'
+        : ''}
+        ${t.unattributedSpend > 0
+          ? `A further <b>${usd(t.unattributedSpend)}</b>
+             (${pct(t.windowSpend ? t.unattributedSpend / t.windowSpend : 0)}) is billed with no node
+             behind it — generations begun and abandoned — and is excluded from the ranking above.`
+          : ''}</span></div>
+    </div>`;
 }
 
 export function renderWorkflow(model, state) {

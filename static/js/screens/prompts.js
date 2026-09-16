@@ -2,10 +2,10 @@
 // Half config, half measurement: sizes come from the agent config, the money
 // comes from the conversations.
 
-import { isPerTurnKind, segColor } from '../derive.js';
+import { UNATTRIBUTED, isPerTurnKind, segColor } from '../derive.js';
 import { avatarLegend } from '../models.js';
 import { tokenizerExact, tokenizerLabel, tokenizerSource } from '../tokenizer.js';
-import { h, int, num, pct, usd, versionSelect } from '../util.js';
+import { barBg, h, int, num, pct, usd, versionSelect } from '../util.js';
 
 // Sortable columns. `value` returns the number or string the column sorts on;
 // `render` draws the cell. Composition has no meaningful ordering.
@@ -45,13 +45,26 @@ function compositionMeter(audit) {
 function tiles(model) {
   const p = model.prompts;
   const t = model.totals;
+  // Against completions, not against all input: the numerator is prompt input
+  // on audited nodes only, so calling it "read per written" — as the Workflow
+  // tile legitimately does for billed input — would invite comparing two
+  // ratios that share a denominator and nothing else.
   const ratio = t.tout ? (p.promptTokens / t.tout).toFixed(1) + '× the completion tokens' : '—';
   const biggest = p.biggest;
+  // Prompt tokens cover only the nodes whose prompt resolved from the cached
+  // config. The rest of the window's input — tool nodes, agents with no cached
+  // definition, turns with no node — is real but has no prompt to audit, and a
+  // tile that omits that reads as though it were the whole window.
+  const covered = p.audits.length;
+  const nodes = model.ledger.filter((r) => r.id !== UNATTRIBUTED).length;
+  const uncovered = Math.max(0, t.attributedTin - p.promptTokens);
   return `<div class="grid grid-5">
     <div class="tile tile--accent">
       <div class="tile__k">prompt tokens sent</div>
       <div class="tile__v">${num(p.promptTokens)}</div>
       <div class="tile__note">${h(ratio)} · ${usd(p.promptSpend)} · ${pct(p.promptShareOfWindow)} of window spend</div>
+      <div class="tile__note" style="margin-top:2px">on ${int(covered)} of ${int(nodes)} nodes —
+        the ${num(uncovered)} input tokens on nodes with no cached prompt are not counted here</div>
     </div>
     <div class="tile">
       <div class="tile__k">static, re-sent every call</div>
@@ -233,6 +246,70 @@ export function reportPrompts(model, state) {
       ${fillCard(model)}
       <div style="margin-top:12px">${dupeCard(model)}</div>
     </section>`;
+}
+
+const OVERVIEW_TOP = 5;
+
+/**
+ * Prompt panel for the Overview: the screen's own tiles, the costliest prompts,
+ * and what fills the context.
+ *
+ * Ranked on `promptCost` — the cache-aware cost of the prompt itself — rather
+ * than on node spend, so this answers "which prompt costs most to send" and not
+ * "which node costs most to run". They often agree; when they diverge the
+ * difference is the point.
+ *
+ * Config-derived sizes stay marked: a row whose owning agent is not cached
+ * shows — rather than borrowing another agent's prompt, exactly as on the
+ * screen.
+ */
+export function overviewPrompts(model, state) {
+  const audits = model.prompts.audits;
+  const top = audits.slice().sort((a, b) => b.promptCost - a.promptCost).slice(0, OVERVIEW_TOP);
+  const max = Math.max(1e-9, ...top.map((r) => r.promptCost));
+  const topSpend = top.reduce((a, r) => a + r.promptCost, 0);
+
+  return `
+    ${tiles(model)}
+    <div class="card" style="margin-top:12px">
+      <div class="card__head"><h3>Costliest prompts</h3>
+        <div class="sub">top ${top.length} of ${int(audits.length)} by prompt cost</div>
+        <div class="right"><button class="btn btn--sm" data-act="screen" data-id="prompts">Open prompts →</button></div>
+      </div>
+      <div class="card__body" style="padding:4px 8px;overflow-x:auto">
+        ${top.length ? `<table class="tbl tbl--tight">
+          <thead><tr><th>Node</th><th>Agent</th><th>Model</th>
+            <th class="num">Prompt<span class="thn">tok/call</span></th>
+            <th class="num">Static<span class="thn">tok</span></th>
+            <th class="num">Calls<span class="thn">per conv</span></th>
+            <th style="width:140px">Share</th><th class="num">Prompt cost</th></tr></thead>
+          <tbody>${top.map((a) => `
+            <tr class="is-click" data-act="open-node" data-id="${h(a.id)}">
+              <td><div class="row" style="gap:7px">
+                <div class="pm ${h(a.pmCls || 'pm--el')}">${h(a.ini || 'fn')}</div>
+                <span style="font-weight:500">${h(a.label)}</span>
+              </div></td>
+              <td class="small">${a.isPrimary === false
+                ? `<span class="badge badge--warn mono">${h(a.agentName || a.agentId)}</span>`
+                : '<span class="muted">this agent</span>'}</td>
+              <td class="mono small muted">${h(a.model || '—')}</td>
+              <td class="num">${cfg(a.measuredPerCall, int)}</td>
+              <td class="num">${cfg(a.staticTokens, int)}</td>
+              <td class="num">${int(a.calls)}<span class="thn">${a.callsPerConv == null ? '—' : a.callsPerConv.toFixed(2)}</span></td>
+              <td><div class="bartrack"><i class="bar"
+                style="width:${((a.promptCost / max) * 100).toFixed(0)}%;background:${barBg(a.promptCost / max)}"></i></div></td>
+              <td class="num" style="font-weight:500">${usd(a.promptCost)}</td>
+            </tr>`).join('')}</tbody>
+        </table>` : `<div class="empty">No node on this agent carries an authored prompt that
+          resolved from the cached config.</div>`}
+      </div>
+      ${top.length ? `<div class="card__foot"><span>These ${top.length} account for
+        ${pct(model.prompts.promptSpend ? topSpend / model.prompts.promptSpend : 0)} of prompt spend,
+        which is itself ${pct(model.prompts.promptShareOfWindow)} of the window.
+        ${tokenizerExact() ? '' : 'Config-side sizes come from the heuristic tokenizer and are prefixed ~.'}
+      </span></div>` : ''}
+    </div>
+    <div style="margin-top:12px">${fillCard(model)}</div>`;
 }
 
 export function renderPrompts(model, state) {

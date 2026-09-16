@@ -76,6 +76,25 @@ export function countTokens(text) {
   return n;
 }
 
+/**
+ * Token estimate from a character count alone, for text we deliberately do not
+ * tokenize.
+ *
+ * Tool result payloads run to tens of megabytes — one real window holds 26.1M
+ * characters of them — and running a BPE tokenizer over that in the browser
+ * would stall the page for no useful gain in precision. The count is already an
+ * estimate whichever way it is produced, so this takes the cheap route and the
+ * UI marks every figure derived from it with `~`.
+ *
+ * Deliberately uses the same CHARS_PER_TOKEN as the heuristic tokenizer's latin
+ * path, so there is one number to argue with rather than two.
+ */
+export const approxTokensFromChars = (chars) => (chars > 0
+  ? Math.round(chars / CHARS_PER_TOKEN)
+  : 0);
+
+export const charsPerToken = () => CHARS_PER_TOKEN;
+
 export const tokenizerSource = () => source;
 
 /** True when config-side sizes come from a real tokenizer rather than the heuristic. */
