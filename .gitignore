@@ -1,0 +1,54 @@
+# ── Secrets and credentials ───────────────────────────────────────────
+# Alias index for saved API keys. The key VALUES live in the OS keychain, but
+# this file still holds alias names, workspace regions and masked prefixes.
+.keys.json
+*.keys.json
+
+# Never commit an env file. ELEVENLABS_API_KEY is read from the environment.
+.env
+.env.*
+!.env.example
+
+# Unsaved editor scratch buffers — these have held pasted API keys.
+Untitled*
+
+*.pem
+*.key
+id_rsa*
+
+# ── Workspace data ────────────────────────────────────────────────────
+# The API response cache: real conversation transcripts, customer speech and
+# resolved dynamic variables (account ids, card last-4, names, phone numbers).
+# This is customer PII. Never commit it.
+data/
+
+
+# Saved graph layouts — local UI state, per machine.
+layouts/
+
+# ── Local tooling state ───────────────────────────────────────────────
+# Claude Code's permission allowlist accretes the literal commands that were
+# approved on this machine, including real agent and conversation ids.
+.claude/
+
+# ── Runtime and build noise ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+node_modules/
+*.log
+
+# ── OS and editor ─────────────────────────────────────────────────────
+.DS_Store
+._*
+Thumbs.db
+.thumbnail
+*.swp
+*.tmp
+.vscode/
+.idea/
+
+static/ds/fonts/
+ClaudeDesign/
