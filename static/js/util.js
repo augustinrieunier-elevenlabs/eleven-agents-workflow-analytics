@@ -153,6 +153,111 @@ export const versionSelect = (state) => {
     </select><span aria-hidden="true" style="opacity:.5;font-size:9px">▾</span></span>`;
 };
 
+// ── sortable, paginated tables ────────────────────────────────────────
+//
+// Three tables need the same two behaviours (Conversations, the node ledger,
+// and the prompt audit). These helpers are the shared implementation; a column
+// is `{ key, label, sub?, num?, width?, sortable?: false, sortOn(row) }`.
+
+export const PAGE_SIZE = 50;
+
+/**
+ * Sort rows by a column's `sortOn`. Strings compare with localeCompare so
+ * accented node labels order the way a reader expects; everything else
+ * numerically, with null/undefined treated as 0 rather than throwing them to
+ * one end at random.
+ */
+export const sortRowsBy = (rows, columns, sort) => {
+  const col = (columns || []).find((c) => c.key === (sort && sort.key));
+  if (!col || !col.sortOn) return rows;
+  const dir = sort.dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const x = col.sortOn(a);
+    const y = col.sortOn(b);
+    if (typeof x === 'string' || typeof y === 'string') {
+      return String(x == null ? '' : x).localeCompare(String(y == null ? '' : y)) * dir;
+    }
+    return (((x == null ? 0 : x)) - ((y == null ? 0 : y))) * dir;
+  });
+};
+
+/** `<thead>` whose sortable cells carry `act` and the column key. */
+export const sortHeader = (columns, sort, act) => `<thead><tr>${(columns || []).map((c) => {
+  const active = sort && sort.key === c.key;
+  const arrow = active ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+  const width = c.width ? ` style="min-width:${c.width}"` : '';
+  const sub = c.sub ? `<span class="thn">${h(c.sub)}</span>` : '';
+  if (c.sortable === false || !c.sortOn) {
+    return `<th class="${c.num ? 'num' : ''}"${width}>${h(c.label)}${sub}</th>`;
+  }
+  return `<th class="${c.num ? 'num ' : ''}th-sort${active ? ' th-sort--on' : ''}"${width}`
+    + ` data-act="${h(act)}" data-id="${h(c.key)}" title="Sort by ${attr(c.label)}">`
+    + `${h(c.label)}${arrow}${sub}</th>`;
+}).join('')}</tr></thead>`;
+
+/**
+ * Next sort state for a header click: a new column starts on its natural
+ * direction (text ascending, numbers descending — biggest first is what anyone
+ * wants of a cost column), and clicking the active column flips it.
+ */
+export const nextSort = (columns, current, key) => {
+  if (current && current.key === key) {
+    return { key, dir: current.dir === 'desc' ? 'asc' : 'desc' };
+  }
+  const col = (columns || []).find((c) => c.key === key);
+  return { key, dir: col && col.num ? 'desc' : 'asc' };
+};
+
+/**
+ * One page of rows. The page number is clamped rather than trusted: a filter
+ * or version change can shrink the list under a page you are already on, and
+ * showing an empty table then is a bug, not a state.
+ */
+export const pageSlice = (rows, page, size = PAGE_SIZE) => {
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(1, Math.floor(page || 1)), pages);
+  const start = (current - 1) * size;
+  return {
+    rows: rows.slice(start, start + size),
+    page: current, pages, total, size,
+    from: total ? start + 1 : 0,
+    to: Math.min(start + size, total),
+  };
+};
+
+/** Pager control. Renders nothing when everything fits on one page. */
+export const pager = (info, act) => {
+  if (info.pages <= 1) return '';
+  const btn = (to, label, disabled, title) =>
+    `<button class="btn btn--sm" data-act="${h(act)}" data-id="${to}"${disabled ? ' disabled' : ''}`
+    + `${title ? ` title="${attr(title)}"` : ''}>${label}</button>`;
+  // A window of page numbers around the current one, so 200 pages do not render
+  // 200 buttons.
+  const span = 2;
+  const first = Math.max(1, Math.min(info.page - span, info.pages - span * 2));
+  const last = Math.min(info.pages, Math.max(info.page + span, span * 2 + 1));
+  const nums = [];
+  for (let i = first; i <= last; i += 1) {
+    nums.push(`<button class="btn btn--sm${i === info.page ? ' btn--primary' : ''}"
+      data-act="${h(act)}" data-id="${i}" aria-current="${i === info.page}">${i}</button>`);
+  }
+  return `<div class="row" style="gap:5px;align-items:center">
+    ${btn(1, '«', info.page === 1, 'First page')}
+    ${btn(info.page - 1, '‹', info.page === 1, 'Previous page')}
+    ${first > 1 ? '<span class="muted small">…</span>' : ''}
+    ${nums.join('')}
+    ${last < info.pages ? '<span class="muted small">…</span>' : ''}
+    ${btn(info.page + 1, '›', info.page === info.pages, 'Next page')}
+    ${btn(info.pages, '»', info.page === info.pages, 'Last page')}
+  </div>`;
+};
+
+/** "1–50 of 281" — always rendered, so the total is visible even on one page. */
+export const pageCount = (info, noun) => (info.total
+  ? `${int(info.from)}–${int(info.to)} of ${int(info.total)} ${h(noun)}`
+  : `no ${h(noun)}`);
+
 /** Sequential ramp bin — the Heat encoding on the graph. */
 export const ramp = (share, max) => {
   const t = max ? share / max : 0;

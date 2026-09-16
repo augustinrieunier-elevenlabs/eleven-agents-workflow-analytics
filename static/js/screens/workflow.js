@@ -4,8 +4,29 @@
 import { NODE_H, NODE_W, UNATTRIBUTED } from '../derive.js';
 import { edgePath } from '../graph.js';
 import {
-  barBg, daysBetween, h, int, median, ms, num, pct, ramp, signedPct, usd, versionSelect,
+  barBg, daysBetween, h, int, median, ms, nextSort, num, pageCount, pageSlice, pager, pct,
+  ramp, signedPct, sortHeader, sortRowsBy, usd, versionSelect,
 } from '../util.js';
+
+// Every column sorts, including `#`. The rank is assigned once, by spend, before
+// any other sort is applied — so it stays put as you sort by other columns and
+// sorting *by* it restores the spend order. A rank that renumbered itself on
+// every sort would carry no information at all.
+export const LEDGER_COLUMNS = [
+  { key: 'rank', label: '#', sortOn: (r) => r.rank },
+  { key: 'label', label: 'Node', sortOn: (r) => String(r.label || '').toLowerCase() },
+  { key: 'agent', label: 'Agent', sortOn: (r) => (r.isPrimary ? '\u0000' : '')
+    + String(r.agentName || r.agentId || '').toLowerCase() },
+  { key: 'model', label: 'Model', sortOn: (r) => String(r.model || '') },
+  { key: 'calls', label: 'Calls', num: true, sortOn: (r) => r.calls },
+  { key: 'tin', label: 'Tok in', sub: 'avg/call', num: true, sortOn: (r) => r.tin },
+  { key: 'tout', label: 'Tok out', sub: 'avg/call', num: true, sortOn: (r) => r.tout },
+  { key: 'p50', label: 'p50', num: true, sortOn: (r) => r.p50 },
+  { key: 'share', label: 'Share', width: '180px', sortOn: (r) => r.share },
+  { key: 'cost', label: 'Spend', num: true, sortOn: (r) => r.cost },
+];
+
+export const ledgerSortFor = (current, key) => nextSort(LEDGER_COLUMNS, current, key);
 
 const ENCODINGS = [
   ['heat', 'Heat', 'Node fill = share of window spend.'],
@@ -196,19 +217,17 @@ function reconciliation(model) {
   </div>`;
 }
 
-function ledgerTable(model) {
-  const rows = model.ledger;
+function ledgerTable(model, state) {
+  // model.ledger arrives sorted by spend, so the index is the spend rank.
+  const ranked = model.ledger.map((r, i) => ({ ...r, rank: i + 1 }));
+  const sort = (state && state.ledgerSort) || { key: 'rank', dir: 'asc' };
+  const info = pageSlice(sortRowsBy(ranked, LEDGER_COLUMNS, sort), state && state.ledgerPage);
   return `<table class="tbl tbl--tight">
-    <thead><tr>
-      <th class="rank">#</th><th>Node</th><th>Agent</th><th>Model</th><th class="num">Calls</th>
-      <th class="num">Tok in<span class="thn">avg/call</span></th>
-      <th class="num">Tok out<span class="thn">avg/call</span></th>
-      <th class="num">p50</th><th>Share</th><th class="num">Spend</th>
-    </tr></thead>
+    ${sortHeader(LEDGER_COLUMNS, sort, 'ledger-sort')}
     <tbody>
-      ${rows.map((r, i) => `
+      ${info.rows.map((r) => `
       <tr class="is-click" data-act="open-node" data-id="${h(r.id)}">
-        <td class="rank">${i + 1}</td>
+        <td class="rank">${r.rank}</td>
         <td><div class="row" style="gap:7px">
           <div class="pm ${h(r.pmCls)}">${h(r.ini)}</div>
           <span style="font-weight:500">${h(r.label)}</span>
@@ -231,7 +250,12 @@ function ledgerTable(model) {
         <td class="num" style="font-weight:500">${r.cost ? usd(r.cost) : '—'}</td>
       </tr>`).join('')}
     </tbody>
-  </table>`;
+  </table>
+  <div class="row" style="gap:10px;align-items:center;padding:8px 8px 4px">
+    <span class="small muted">${pageCount(info, 'nodes')}</span>
+    <span class="spacer"></span>
+    ${pager(info, 'ledger-page')}
+  </div>`;
 }
 
 export function renderWorkflow(model, state) {
@@ -303,7 +327,7 @@ export function renderWorkflow(model, state) {
   <div class="section">
     <div class="section__head"><h2>Node ledger</h2><div class="sub">sorted by window spend</div></div>
     <div class="card">
-      <div class="card__body" style="padding:4px 8px;overflow-x:auto;min-width:0">${ledgerTable(model)}</div>
+      <div class="card__body" style="padding:4px 8px;overflow-x:auto;min-width:0">${ledgerTable(model, state)}</div>
       ${reconciliation(model)}
     </div>
   </div>`;

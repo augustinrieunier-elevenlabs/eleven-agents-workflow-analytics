@@ -217,6 +217,45 @@ function outliers(model) {
     </div></div>`;
 }
 
+/**
+ * Analytics for the printed report.
+ *
+ * Composed from the same local renderers the screen uses, so a figure in the
+ * PDF cannot disagree with the one on screen — there is no second derivation
+ * and no second layout. Two deliberate omissions:
+ *
+ *   - `outliers()` is dropped. It lists conversation ids, which are
+ *     customer-linkable, and a PDF is the easiest thing in the world to
+ *     forward. The p90 tail figure it illustrates is on the cover instead.
+ *   - the Overview / Ledger segmented control is dropped, and both layouts are
+ *     emitted, because a printed page has no toggle.
+ */
+export function reportAnalytics(model, state) {
+  return `
+    <section class="rpt__sec">
+      <h2>Cost analytics</h2>
+      <div class="rpt__lede">Every figure below is a group-by over the same fetched window —
+        no sampling, no extrapolation.</div>
+      ${tiles(model)}
+      <div class="split" style="margin-top:12px">${dailyCard(model)}${driversCard(model)}</div>
+    </section>
+    <section class="rpt__sec rpt__sec--break">
+      <h2>Where the money goes</h2>
+      <div class="split">
+        <div class="card"><div class="card__head"><h3>Model mix</h3>
+          <div class="sub">where the money actually goes</div></div>
+          <div class="card__body" style="padding:4px 8px">${modelTable(model, false)}</div>
+          <div class="card__foot"><span>Prices are the ones the API returned with these conversations, so they
+            already reflect the workspace tier, burst status and any dev discount.</span></div></div>
+        ${leversCard(model)}
+      </div>
+    </section>
+    <section class="rpt__sec rpt__sec--break">
+      <h2>Node spend by day</h2>
+      ${nodeDayLedger(model, state)}
+    </section>`;
+}
+
 export function renderAnalytics(model, state) {
   const layouts = [['overview', 'Overview'], ['ledger', 'Ledger']];
   const head = `
@@ -227,11 +266,11 @@ export function renderAnalytics(model, state) {
     <div class="page__actions">
       ${versionSelect(state)}
       <div class="seg">${layouts.map(([k, label]) =>
-      `<button data-act="layout" data-id="${k}" aria-pressed="${state.layout === k}">${label}</button>`).join('')}</div>
+      `<button data-act="analytics-view" data-id="${k}" aria-pressed="${state.analyticsView === k}">${label}</button>`).join('')}</div>
     </div>
   </div>`;
 
-  if (state.layout === 'ledger') {
+  if (state.analyticsView === 'ledger') {
     return head + nodeDayLedger(model, state) + `
       <div class="grid grid-2" style="margin-top:12px">
         <div class="card"><div class="card__head"><h3>Model mix</h3></div>

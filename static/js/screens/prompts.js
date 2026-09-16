@@ -203,6 +203,38 @@ function dupeCard(model) {
   </div>`;
 }
 
+/**
+ * Prompt audit for the printed report — the same renderers as the screen.
+ *
+ * The audit table carries no customer data: node names, model names, token
+ * counts and money. It is the widest thing in the report, which is why the
+ * report prints landscape (see `@media print` in kit.css).
+ */
+export function reportPrompts(model, state) {
+  return `
+    <section class="rpt__sec rpt__sec--break">
+      <h2>Prompt audit</h2>
+      <div class="rpt__lede">What each node sends to its model, split into what is resident on every
+        call and what arrives per turn. Static prompt text is the part that shrinks without changing
+        behaviour. Config-side sizes are estimates from <b>${h(tokenizerSource())}</b>${
+        tokenizerExact() ? '' : ' and are prefixed <b>~</b>'}; runtime token counts are exact.</div>
+      ${tiles(model)}
+      ${model.prompts.unknownConfigAgents.length ? `<div class="note note--warn" style="margin-top:12px"><span>
+        <b>${model.prompts.unknownConfigRows.length} node${model.prompts.unknownConfigRows.length === 1 ? '' : 's'}</b>
+        belong to ${model.prompts.unknownConfigAgents.length} agent${model.prompts.unknownConfigAgents.length === 1 ? '' : 's'}
+        whose definition was not cached when this was exported
+        (${model.prompts.unknownConfigAgents.map((n) => h(n)).join(', ')}). Their config columns read
+        <b>—</b> rather than borrowing another agent's prompt.</span></div>` : ''}
+      <div style="margin-top:12px">${table(model, state)}</div>
+      ${legend(model)}
+    </section>
+    <section class="rpt__sec rpt__sec--break">
+      <h2>What fills the context</h2>
+      ${fillCard(model)}
+      <div style="margin-top:12px">${dupeCard(model)}</div>
+    </section>`;
+}
+
 export function renderPrompts(model, state) {
   const src = tokenizerSource();
   const foreign = model.prompts.audits.filter((a) => !a.isPrimary);

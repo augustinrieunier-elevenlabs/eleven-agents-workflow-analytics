@@ -225,7 +225,8 @@ export function renderFit(model, state) {
   return `
   <div class="page__head">
     <div>
-      <h1>Model fit</h1>
+      <h1>Model fit <span style="font-size:0.45em;font-family:var(--font-mono);letter-spacing:.06em;
+        color:var(--warn);vertical-align:0.55em">WIP · BETA</span></h1>
       <div class="sub">What the traffic can say on its own about whether each node's model is the right size.
         Constraints are read off observed behaviour and <b>forbid</b> a downgrade; signals are evidence of
         headroom or strain; the waste figures are arithmetic. Judging whether a given model is capable

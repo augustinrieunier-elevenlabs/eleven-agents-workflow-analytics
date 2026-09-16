@@ -431,3 +431,94 @@ input, select, textarea { font:inherit; }
   .grid-5, .grid-4 { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .split, .split--wide { grid-template-columns:1fr; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Printable cost report (SPEC §8)
+
+   The report is the same markup the screens render, laid out as one long
+   document and paginated here. Two things make or break it:
+
+   1. `print-color-adjust: exact`. Browsers drop background colours in print by
+      default, and in this app the backgrounds *are* the data — the Heat ramp,
+      every bar track, the composition stacks, the accent tiles. Without this
+      the report prints as empty outlines.
+   2. Landscape. The prompt audit is twelve columns wide; portrait truncates it.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.rpt { max-width:1180px; margin:0 auto; padding:0 4px 40px; }
+.rpt__bar { display:flex; align-items:center; gap:10px; padding:10px 14px; margin-bottom:22px;
+  border:1px solid var(--line); border-radius:var(--r-md); background:var(--bg-3); font-size:12.5px; }
+.rpt__cover { padding-bottom:6px; }
+.rpt__brand { display:flex; align-items:flex-start; gap:14px; margin-bottom:22px; }
+.rpt__mark { width:34px; height:34px; border-radius:9px; background:var(--ink); color:var(--ink-inv);
+  display:flex; align-items:center; justify-content:center; font-weight:600; font-size:13px; flex:none; }
+.rpt__kicker { font-family:var(--font-mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); }
+.rpt__title { font-family:var(--font-brand); font-size:30px; line-height:1.05; margin:2px 0 4px; letter-spacing:-0.02em; }
+.rpt__sub { font-size:13px; color:var(--ink-2); }
+.rpt__facts { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
+.rpt__fact { border:1px solid var(--line); border-radius:var(--r-md); padding:10px 12px; background:var(--bg-2); }
+.rpt__fact-k { font-family:var(--font-mono); font-size:9px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); }
+.rpt__fact-v { font-family:var(--font-brand); font-size:21px; margin:3px 0 2px; letter-spacing:-0.01em; }
+.rpt__fact-n { font-size:10.5px; color:var(--ink-3); line-height:1.35; }
+.rpt__headline { border:1px solid var(--ink); border-radius:var(--r-md); padding:12px 14px; margin-bottom:18px; background:var(--bg-3); }
+.rpt__headline-k, .rpt__prov-k, .rpt__caveats-k { font-family:var(--font-mono); font-size:9px;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); margin-bottom:5px; }
+.rpt__headline p { margin:0; font-size:12.5px; line-height:1.55; color:var(--ink); }
+.rpt__prov, .rpt__caveats { margin-bottom:16px; }
+.rpt__prov-t { border-collapse:collapse; width:100%; font-size:11px; }
+.rpt__prov-t th { text-align:left; padding:3px 12px 3px 0; color:var(--ink-3); font-weight:400; white-space:nowrap; width:130px; }
+.rpt__prov-t td { padding:3px 0; color:var(--ink-2); }
+.rpt__caveats ul { margin:0; padding-left:18px; font-size:11.5px; color:var(--ink-2); line-height:1.55; }
+.rpt__note { font-size:10.5px; color:var(--ink-3); line-height:1.5; border-top:1px solid var(--line); padding-top:9px; }
+.rpt__sec { margin-top:26px; }
+.rpt__sec > h2 { font-family:var(--font-brand); font-size:20px; letter-spacing:-0.01em; margin:0 0 3px; }
+.rpt__lede { font-size:12px; color:var(--ink-2); line-height:1.5; margin-bottom:12px; max-width:78ch; }
+.rpt__key td, .rpt__key th { vertical-align:top; }
+
+@media print {
+  /* The data is in the backgrounds. Without this the report prints hollow. */
+  *, *::before, *::after { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+
+  @page { size:A4 landscape; margin:12mm 10mm; }
+
+  html, body { background:#fff !important; }
+  /* kit.css ships a `.dark` palette. Paper is white; ink on paper is dark. If
+     that class is ever toggled, print must not inherit it. */
+  body.dark, .dark {
+    --bg:#FCFAF7; --bg-2:#FFFFFF; --bg-3:#F5F3F1; --bg-inset:#F1EEEA;
+    --line:#E6E2DD; --line-soft:#EFEBE6;
+    --ink:#1E1916; --ink-2:#5A5651; --ink-3:#8A837B; --ink-inv:#FCFAF7;
+    --q1:#cde2fb; --q2:#9ec5f4; --q3:#6da7ec; --q4:#3987e5; --q5:#256abf; --q6:#184f95;
+    --s2:#eb6834;
+  }
+  /* App chrome has no meaning on paper. */
+  .side, .topbar, #overlay, #toast, #setup, .screen-only, .cvs-tools, .cvs-hint,
+  .rpt__bar, .why__pop { display:none !important; }
+  .main { margin:0 !important; }
+  .page, .page--wide { padding:0 !important; max-width:none !important; }
+  .rpt { max-width:none; padding:0; }
+
+  /* Nothing may be clipped or scrolled away on paper. */
+  [style*="overflow-x:auto"], [style*="overflow-x: auto"], [style*="overflow:auto"],
+  .card__body { overflow:visible !important; }
+  .cvs-wrap { height:auto !important; overflow:visible !important; }
+
+  /* Keep a card, a table row or a tile off a page boundary. */
+  .card, .tile, .rpt__fact, .rpt__headline, .barrow { break-inside:avoid; page-break-inside:avoid; }
+  table { break-inside:auto; }
+  thead { display:table-header-group; }
+  tr, .rpt__sec > h2 { break-inside:avoid; page-break-inside:avoid; }
+  .rpt__sec > h2 { break-after:avoid; page-break-after:avoid; }
+  .rpt__sec--break { break-before:page; page-break-before:always; }
+  .rpt__cover { break-after:page; page-break-after:always; }
+
+  /* Print is not a screen: no shadows, no hover affordances, tighter type. */
+  .card, .tile, .badge, .rpt__fact { box-shadow:none !important; }
+  .tbl { font-size:9.5px; }
+  .tbl th, .tbl td { padding:3px 5px !important; }
+  a { text-decoration:none; color:inherit; }
+  .is-click { cursor:default; }
+
+  /* The explainer popovers are hover-only on screen; print the formula inline. */
+  .why { display:inline !important; }
+}

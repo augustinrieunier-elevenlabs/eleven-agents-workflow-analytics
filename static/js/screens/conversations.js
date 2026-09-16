@@ -1,6 +1,23 @@
 // Conversations screen — SPEC §4.
 
-import { dur, h, int, num, pct, quantile, stampOf, sum, usd, versionSelect } from '../util.js';
+import {
+  dur, h, int, num, pageCount, pageSlice, pager, pct, quantile, sortHeader, sortRowsBy,
+  stampOf, sum, usd, versionSelect,
+} from '../util.js';
+
+// Every column sorts. `Path` sorts on how many node executions the conversation
+// went through, which is the one thing a strip of dots actually encodes.
+export const CONV_COLUMNS = [
+  { key: 'id', label: 'Conversation', sortOn: (c) => c.id },
+  { key: 'startedAt', label: 'Started', sortOn: (c) => c.startedAt },
+  { key: 'duration', label: 'Dur', num: true, sortOn: (c) => c.duration },
+  { key: 'turns', label: 'Turns', num: true, sortOn: (c) => c.turns },
+  { key: 'steps', label: 'Path', sub: 'nodes', sortOn: (c) => c.steps.length },
+  { key: 'tin', label: 'Tok in', num: true, sortOn: (c) => c.tin },
+  { key: 'tout', label: 'Tok out', num: true, sortOn: (c) => c.tout },
+  { key: 'outcome', label: 'Outcome', sortOn: (c) => c.outcome.label },
+  { key: 'cost', label: 'Cost', num: true, sortOn: (c) => c.cost },
+];
 
 export function outcomeFilters(model) {
   const seen = new Map();
@@ -51,8 +68,10 @@ function tiles(model, shown) {
 export function renderConversations(model, state) {
   const filters = outcomeFilters(model);
   const shown = filterConversations(model, state.convFilter);
-  const limit = state.convLimit || 60;
-  const page = shown.slice(0, limit);
+  const sort = state.convSort || { key: 'cost', dir: 'desc' };
+  // pageSlice clamps the page, so changing the filter or the version pin while
+  // deep in the list lands on the last page rather than on an empty table.
+  const info = pageSlice(sortRowsBy(shown, CONV_COLUMNS, sort), state.convPage);
 
   return `
   <div class="page__head">
@@ -70,12 +89,9 @@ export function renderConversations(model, state) {
 
   <div class="card"><div class="card__body" style="padding:4px 8px;overflow-x:auto">
     <table class="tbl tbl--tight">
-      <thead><tr>
-        <th>Conversation</th><th>Started</th><th class="num">Dur</th><th class="num">Turns</th>
-        <th>Path</th><th class="num">Tok in</th><th class="num">Tok out</th><th>Outcome</th><th class="num">Cost</th>
-      </tr></thead>
+      ${sortHeader(CONV_COLUMNS, sort, 'conv-sort')}
       <tbody>
-        ${page.map((c) => `
+        ${info.rows.map((c) => `
         <tr class="is-click" data-act="open-conv" data-id="${h(c.id)}">
           <td class="mono" style="font-size:11.5px">${h(c.id)}</td>
           <td class="mono small muted">${h(stampOf(c.startedAt, c.timezone))}</td>
@@ -91,10 +107,11 @@ export function renderConversations(model, state) {
     </table>
   </div>
   <div class="card__foot">
-    <span>Showing ${int(page.length)} of ${int(shown.length)}. Duration is billed call length;
-      <span class="mono">queue_wait_secs</span> is excluded from it.</span>
+    <span>${pageCount(info, 'conversations')}${shown.length !== model.conversations.length
+      ? ' (filtered from ' + int(model.conversations.length) + ')' : ''}. Duration is billed call
+      length; <span class="mono">queue_wait_secs</span> is excluded from it.</span>
     <span class="spacer"></span>
-    ${shown.length > page.length ? `<button class="btn btn--sm" data-act="conv-more">Show 60 more</button>` : ''}
+    ${pager(info, 'conv-page')}
   </div>
   </div>`;
 }

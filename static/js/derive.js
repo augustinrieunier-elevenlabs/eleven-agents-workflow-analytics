@@ -343,6 +343,42 @@ function entriesOf(collection) {
  * `node_01m2g713rse639zan3qx9hdqx5`. Every one of those types carries fields
  * that say what it is, so name it from those instead and mark the name derived.
  */
+/**
+ * Make labels unique within an agent.
+ *
+ * `deriveLabel` only invents a name when none was authored, which leaves the
+ * case where a name *was* authored and is useless: the ElevenLabs editor
+ * defaults a `say` node's label to "Say", and one real EU agent carries four of
+ * them. Four ledger rows called "Say" on one agent cannot be told apart on any
+ * screen, and in an exported report they are indistinguishable to a reader who
+ * cannot click them.
+ *
+ * Collisions *across* agents are fine and are handled by showing the agent
+ * (SPEC 7.5c) — `start_node` on three agents is three legitimate "Start" rows.
+ * Only a collision within one agent is ambiguous, so only that is suffixed, and
+ * with the node's own id, which is the thing that actually distinguishes them.
+ */
+function disambiguateLabels(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (row.id === UNATTRIBUTED) continue;
+    const key = (row.agentId || '') + '\u0000' + row.label;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (const row of group) {
+      const bare = row.nodeId || splitKey(row.id).nodeId;
+      const short = /^[a-z_]*_?[a-z0-9]{20,}$/i.test(bare)
+        ? bare.slice(0, 5) + '\u2026' + bare.slice(-6)
+        : bare;
+      row.label = row.label + ' \u00b7 ' + short;
+      row.labelDisambiguated = true;
+    }
+  }
+}
+
 function deriveLabel(id, def, ctx) {
   const d = (def && typeof def === 'object') ? def : {};
   const authored = (typeof d.label === 'string' && d.label.trim())
@@ -1120,6 +1156,7 @@ export function buildModel(bundle, opts = {}) {
     row.ini = avatar.ini;
     row.pmCls = avatar.cls;
   });
+  disambiguateLabels(ledger);
   ledger.sort((a, b) => b.cost - a.cost);
   const maxShare = Math.max(...ledger.map((r) => r.share), 0);
 

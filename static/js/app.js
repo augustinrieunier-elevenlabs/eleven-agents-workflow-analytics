@@ -6,23 +6,27 @@ import * as api from './api.js';
 import { buildModel, collectModelUsage, usageCost } from './derive.js';
 import { attachGraph, detachGraph } from './graph.js';
 import { renderAnalytics } from './screens/analytics.js';
-import { renderConversations } from './screens/conversations.js';
 import { renderConvDrawer, renderNodeDrawer } from './screens/drawers.js';
 import { renderFit } from './screens/fit.js';
 import { renderPrompts } from './screens/prompts.js';
-import { encodingList, renderWorkflow } from './screens/workflow.js';
+import { renderReport } from './screens/report.js';
+import { LEDGER_COLUMNS, encodingList, renderWorkflow } from './screens/workflow.js';
+import { CONV_COLUMNS, renderConversations } from './screens/conversations.js';
 import {
   agentCountLabel, renderAgentList, renderAgentOptions, renderSetup,
 } from './screens/setup.js';
 import { upgrade } from './tokenizer.js';
-import { $, daysBetween, h, int, longDate, shiftDays, shortDate, today } from './util.js';
+import {
+  $, daysBetween, h, int, longDate, nextSort, shiftDays, shortDate, today,
+} from './util.js';
 
 const SCREENS = {
   workflow: 'Workflow cost',
   prompts: 'Prompt audit',
-  fit: 'Model fit',
+  fit: 'Model fit (wip, beta)',
   conversations: 'Conversations',
   analytics: 'Token analytics',
+  report: 'Cost report',
 };
 
 const state = {
@@ -66,9 +70,17 @@ const state = {
 
   screen: 'workflow',
   encoding: 'heat',
-  layout: 'overview',
+  // Which Analytics layout is shown. Named apart from `layout` on purpose: that
+  // one holds the saved graph positions, and the two shared a field. The
+  // duplicate key meant this default was dead, clicking Ledger overwrote the
+  // positions with the string 'ledger' (dropping every dragged node on the next
+  // rebuild), and dragging a node made the toggle inert.
+  analyticsView: 'overview',
   convFilter: 'All',
-  convLimit: 60,
+  convSort: { key: 'cost', dir: 'desc' },
+  convPage: 1,
+  ledgerSort: { key: 'rank', dir: 'asc' },
+  ledgerPage: 1,
   promptSort: { key: 'promptCost', dir: 'desc' },
   node: null,
   conv: null,
@@ -93,7 +105,7 @@ function sidebar() {
   const nav = [
     ['workflow', 'Workflow', model ? model.ledger.length : ''],
     ['prompts', 'Prompts', model ? model.prompts.audits.length : ''],
-    ['fit', 'Model fit', model ? (model.fit.totals.headroom + model.fit.totals.strained) || '' : ''],
+    ['fit', 'Model fit (wip, beta)', model ? (model.fit.totals.headroom + model.fit.totals.strained) || '' : ''],
     ['conversations', 'Conversations', model ? int(model.totals.conversations) : ''],
     ['analytics', 'Analytics', model ? model.days.length + 'd' : ''],
   ];
@@ -118,12 +130,15 @@ function sidebar() {
       </div>
     </div>
     <div class="side__foot">
-      <div class="side__label">encoding</div>
+      <div class="side__label"${state.screen === 'report' ? ' hidden' : ''}>encoding</div>
       <div class="stack" style="gap:1px;padding:0 2px">
         ${encodingList().map(([key, label]) => `<button class="nav-item${state.encoding === key ? ' nav-item--on' : ''}"
           data-act="encoding" data-id="${key}">${label}</button>`).join('')}
       </div>
-      <button class="btn btn--ghost btn--sm" data-act="reset" style="margin-top:10px;justify-content:flex-start">Change connection</button>
+      <button class="btn btn--sm" data-act="screen" data-id="report"
+        style="margin-top:10px;justify-content:flex-start"
+        title="A printable cost report: analytics and the prompt audit, with provenance. No transcripts or conversation ids.">Export report</button>
+      <button class="btn btn--ghost btn--sm" data-act="reset" style="margin-top:6px;justify-content:flex-start">Change connection</button>
     </div>`;
 }
 
@@ -170,7 +185,19 @@ function warnings() {
 function page() {
   const model = state.model;
   if (!model) return '<div class="empty">No window loaded.</div>';
-  const ctx = { ...state, rangeLong: longDate(state.from) + ' → ' + longDate(state.to) };
+  const meta = (state.bundle && state.bundle.meta) || {};
+  const ctx = {
+    ...state,
+    rangeLong: longDate(state.from) + ' → ' + longDate(state.to),
+    // Provenance for the printed report's cover — a cost figure with no window,
+    // region or fetch time behind it cannot be checked by whoever receives it.
+    branchLabel: branchSummary(),
+    fetchedAt: meta.fetched_at || null,
+    keyFingerprint: meta.key_fingerprint || null,
+  };
+  // The report is its own screen: one long static document, no chrome, printed
+  // by the @media print block rather than by a second rendering path.
+  if (state.screen === 'report') return renderReport(model, ctx);
   if (state.screen === 'prompts') return warnings() + renderPrompts(model, ctx);
   if (state.screen === 'fit') return warnings() + renderFit(model, ctx);
   if (state.screen === 'conversations') return warnings() + renderConversations(model, ctx);
@@ -532,7 +559,9 @@ async function loadWindow() {
     state.model.warnings.push('The cache was written with a different API key than the one held now — it may be from another workspace.');
   }
   state.phase = 'ready';
-  state.convLimit = 60;
+  // A fresh window invalidates any page position in either table.
+  state.convPage = 1;
+  state.ledgerPage = 1;
   await loadObservedVersions();
 }
 
@@ -767,7 +796,9 @@ const actions = {
     // An open drawer may be for a node that this version never ran.
     state.node = null;
     state.conv = null;
-    state.convLimit = 60;
+    // The pin reorders and resizes both lists; page 1 is the only safe landing.
+    state.convPage = 1;
+    state.ledgerPage = 1;
     syncVersionPin();
     rebuild();
   },
@@ -798,10 +829,13 @@ const actions = {
   'reset': () => { state.phase = 'setup'; state.job = null; state.node = null; state.conv = null; },
 
   'screen': (el) => { state.screen = el.dataset.id; state.node = null; state.conv = null; },
+
+  // Hand off to the browser's own PDF engine. No library, no headless browser,
+  // and the figures are the ones already on screen.
+  'print-report': () => { window.print(); return false; },
   'encoding': (el) => { state.encoding = el.dataset.id; },
-  'layout': (el) => { state.layout = el.dataset.id; },
-  'conv-filter': (el) => { state.convFilter = el.dataset.id; state.convLimit = 60; },
-  'conv-more': () => { state.convLimit += 60; },
+  'analytics-view': (el) => { state.analyticsView = el.dataset.id; },
+  'conv-filter': (el) => { state.convFilter = el.dataset.id; state.convPage = 1; },
 
   // Click a header to sort; click the active header again to flip direction.
   'prompt-sort': (el) => {
@@ -811,6 +845,19 @@ const actions = {
       ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' }
       : { key, dir: key === 'label' || key === 'model' ? 'asc' : 'desc' };
   },
+
+  // Re-sorting reorders the whole list, so page 1 is the only page that still
+  // means anything afterwards.
+  'conv-sort': (el) => {
+    state.convSort = nextSort(CONV_COLUMNS, state.convSort, el.dataset.id);
+    state.convPage = 1;
+  },
+  'conv-page': (el) => { state.convPage = Number(el.dataset.id) || 1; },
+  'ledger-sort': (el) => {
+    state.ledgerSort = nextSort(LEDGER_COLUMNS, state.ledgerSort, el.dataset.id);
+    state.ledgerPage = 1;
+  },
+  'ledger-page': (el) => { state.ledgerPage = Number(el.dataset.id) || 1; },
 
   'fit-toggle': (el) => { state.fitOpen = state.fitOpen === el.dataset.id ? null : el.dataset.id; },
   'fit-agent': (el) => { state.fitAgent = el.dataset.id || null; state.fitOpen = null; },
