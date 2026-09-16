@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Cost Explorer</title>
+<link rel="stylesheet" href="/static/ds/tokens.css">
+<link rel="stylesheet" href="/static/kit.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Carried over from the mockup sheet — graph canvas, node boxes, topbar wrap. */
+body{margin:0;background:var(--bg);}
+a{color:var(--ink);} a:hover{color:#000;}
+.nd{position:absolute;text-align:left;border:1px solid var(--line);background:var(--bg-2);border-radius:10px;padding:9px 10px;box-shadow:var(--shadow-sm);transition:box-shadow .12s,transform .12s;}
+.nd:hover{box-shadow:var(--shadow-md);transform:translateY(-1px);}
+.nd--on{border-color:var(--ink);box-shadow:0 0 0 2px var(--ink);}
+/* Interactive canvas: a fixed viewport, with the graph transformed inside it. */
+.cvs-wrap{position:relative;overflow:hidden;height:min(68vh,620px);min-height:380px;
+  background:var(--bg-inset);touch-action:none;cursor:grab;}
+.cvs-wrap.is-panning{cursor:grabbing;}
+.cvs{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;}
+.cvs svg{position:absolute;inset:0;overflow:visible;pointer-events:none;}
+.cvs svg path{pointer-events:stroke;}
+.nd{cursor:grab;user-select:none;touch-action:none;}
+.nd.is-dragging{cursor:grabbing;z-index:6;box-shadow:var(--shadow-lg);}
+.nd--stray{border-style:dashed;border-color:var(--warn-line);}
+.cvs-tools{position:absolute;right:10px;bottom:10px;z-index:10;display:flex;align-items:center;gap:6px;
+  padding:5px;border:1px solid var(--line);border-radius:var(--r-full);
+  background:color-mix(in srgb, var(--bg-2) 92%, transparent);backdrop-filter:blur(6px);box-shadow:var(--shadow-sm);}
+.cvs-tools .btn{min-width:30px;justify-content:center;}
+.cvs-hint{position:absolute;left:12px;bottom:14px;z-index:9;font-size:9.5px;color:var(--ink-3);
+  pointer-events:none;letter-spacing:.02em;}
+.crumbs span,.crumbs b{flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38ch;}
+.side__foot .nav-item{white-space:nowrap;}
+.card__head h3,.section__head h2{white-space:nowrap;flex:none;}
+.topbar{height:auto;min-height:48px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px;}
+.topbar__right{flex-wrap:wrap;min-width:0;row-gap:6px;}
+.topbar__right .field{min-width:0;}
+.topbar__right .field input{min-width:0;width:96px;}
+
+/* App-only additions. */
+[hidden]{display:none !important;}
+.keyinput{height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg-2);color:var(--ink);font-family:var(--font-mono);font-size:12.5px;}
+.progress{height:6px;border-radius:3px;background:var(--bg-inset);overflow:hidden;}
+.progress i{display:block;height:100%;background:var(--ink);transition:width .25s;}
+.pathdots{display:flex;gap:3px;}
+.pathdots i{width:7px;height:7px;border-radius:2px;display:block;}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:120;background:var(--ink);color:var(--ink-inv);
+  padding:9px 15px;border-radius:var(--r-full);font-size:12.5px;box-shadow:var(--shadow-lg);max-width:min(560px,92vw);}
+.spin{display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:sp .7s linear infinite;vertical-align:-1px;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.tbl tbody tr.is-click{cursor:pointer;}
+/* Sortable table headers. */
+.th-sort{cursor:pointer;user-select:none;}
+.th-sort:hover{color:var(--ink);background:var(--bg-3);}
+.th-sort--on{color:var(--ink);}
+.edge-label{font:500 9.5px 'JetBrains Mono',ui-monospace;fill:var(--ink-3);}
+.edge-fail{stroke-dasharray:4 4;}
+.srcnote{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);}
+/* Explainer popovers sit above the card and must not be clipped by it. */
+.why__pop{max-width:min(360px,80vw);}
+.why:hover,.why:focus-visible{z-index:61;}
+.note:has(.why){overflow:visible;}
+.setup-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 24px;min-height:100vh;}
+.setup-inner{width:100%;max-width:620px;}
+</style>
+</head>
+<body>
+
+<div class="app" id="app" style="font-family:var(--font-body)">
+  <!-- Setup screen (SPEC §1) -->
+  <div id="setup" class="setup-wrap"></div>
+
+  <!-- Explorer shell -->
+  <aside class="side" id="side" hidden></aside>
+  <div class="main" id="main" hidden>
+    <div class="topbar" id="topbar"></div>
+    <div class="page page--wide" id="page"></div>
+  </div>
+</div>
+
+<div id="overlay"></div>
+<div id="toast"></div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

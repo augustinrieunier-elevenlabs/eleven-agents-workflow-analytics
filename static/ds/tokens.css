@@ -1,0 +1,143 @@
+/* ─────────────────────────────────────────────────────────────
+ * ElevenLabs Design System — tokens.css
+ * Canonical tokens.
+ *
+ * Load once:  <link rel="stylesheet" href="tokens.css" />
+ *
+ * The path MUST be absolute ("/tokens.css", "/fonts/...", etc.) — this
+ * project serves from root, so url() references here resolve cleanly
+ * from any HTML file regardless of folder depth.
+ * ───────────────────────────────────────────────────────────── */
+
+/* ───── KMR Waldenburg — brand-primary display/body ─────
+ * 48 OTF styles ship in /fonts/ — 8 weights × 3 widths × 2 slopes.
+ *
+ *   German weight → numeric:
+ *     Fein 100 · Mager 200 · Buch 300 · Normal 400
+ *     Halbfett 500 · Fett 700 · Schwer 800 · Schwarz 900
+ *
+ *   Widths:
+ *     (none)      → normal       — family 'KMR Waldenburg'
+ *     Halbschmal  → semi-cond.   — family 'KMR Waldenburg SemiCondensed'
+ *     Schmal      → condensed    — family 'KMR Waldenburg Condensed'
+ *
+ *   Slopes: upright + Kursiv (italic).
+ * ──────────────────────────────────────────────────────── */
+
+/* Normal width — 16 styles */
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Fein.otf') format('opentype');         font-weight:100; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-FeinKursiv.otf') format('opentype');   font-weight:100; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Mager.otf') format('opentype');        font-weight:200; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-MagerKursiv.otf') format('opentype');  font-weight:200; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Buch.otf') format('opentype');         font-weight:300; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-BuchKursiv.otf') format('opentype');   font-weight:300; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Normal.otf') format('opentype');       font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-NormalKursiv.otf') format('opentype'); font-weight:400; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Halbfett.otf') format('opentype');     font-weight:500; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-HalbfettKursiv.otf') format('opentype');font-weight:500; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Fett.otf') format('opentype');         font-weight:700; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-FettKursiv.otf') format('opentype');   font-weight:700; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Schwer.otf') format('opentype');       font-weight:800; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-SchwerKursiv.otf') format('opentype'); font-weight:800; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-Schwarz.otf') format('opentype');      font-weight:900; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg'; src:url('fonts/KMR-Waldenburg-SchwarzKursiv.otf') format('opentype');font-weight:900; font-style:italic; font-display:swap; }
+
+/* SemiCondensed (Halbschmal) — 16 styles */
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-FeinHalbschmal.otf') format('opentype');         font-weight:100; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-FeinHalbschmalKursiv.otf') format('opentype');   font-weight:100; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-MagerHalbschmal.otf') format('opentype');        font-weight:200; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-MagerHalbschmalKursiv.otf') format('opentype');  font-weight:200; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-BuchHalbschmal.otf') format('opentype');         font-weight:300; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-BuchHalbschmalKursiv.otf') format('opentype');   font-weight:300; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-Halbschmal.otf') format('opentype');             font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-HalbschmalKursiv.otf') format('opentype');       font-weight:400; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-HalbfettHalbschmal.otf') format('opentype');     font-weight:500; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-HalbfettHalbschmalKursiv.otf') format('opentype');font-weight:500; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-FettHalbschmal.otf') format('opentype');         font-weight:700; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-FettHalbschmalKursiv.otf') format('opentype');   font-weight:700; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-SchwerHalbschmal.otf') format('opentype');       font-weight:800; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-SchwerHalbschmalKursiv.otf') format('opentype'); font-weight:800; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-SchwarzHalbschmal.otf') format('opentype');      font-weight:900; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg SemiCondensed'; src:url('fonts/KMR-Waldenburg-SchwarzHalbschmalKursiv.otf') format('opentype');font-weight:900; font-style:italic; font-display:swap; }
+
+/* Condensed (Schmal) — 16 styles */
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-FeinSchmal.otf') format('opentype');         font-weight:100; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-FeinSchmalKursiv.otf') format('opentype');   font-weight:100; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-MagerSchmal.otf') format('opentype');        font-weight:200; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-MagerSchmalKursiv.otf') format('opentype');  font-weight:200; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-BuchSchmal.otf') format('opentype');         font-weight:300; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-BuchSchmalKursiv.otf') format('opentype');   font-weight:300; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-Schmal.otf') format('opentype');             font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-SchmalKursiv.otf') format('opentype');       font-weight:400; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-HalbfettSchmal.otf') format('opentype');     font-weight:500; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-HalbfettSchmalKursiv.otf') format('opentype');font-weight:500; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-FettSchmal.otf') format('opentype');         font-weight:700; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-FettSchmalKursiv.otf') format('opentype');   font-weight:700; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-SchwerSchmal.otf') format('opentype');       font-weight:800; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-SchwerSchmalKursiv.otf') format('opentype'); font-weight:800; font-style:italic; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-SchwarzSchmal.otf') format('opentype');      font-weight:900; font-style:normal; font-display:swap; }
+@font-face { font-family:'KMR Waldenburg Condensed'; src:url('fonts/KMR-Waldenburg-SchwarzSchmalKursiv.otf') format('opentype');font-weight:900; font-style:italic; font-display:swap; }
+
+/* Inter + Instrument Sans — PPTX-facing + digital fallback */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ═══════ CORE PALETTE — monochrome brand ═══════ */
+  --graphite:    #1E1916;
+  --near-black:  #151515;
+  --black:       #000000;
+  --off-white:   #FAFAFA;
+  --cream:       #F5F3F1;
+  --light-gray:  #E0DEDC;
+  --mid-gray:    #999999;
+  --dark-gray:   #666666;
+  --white:       #FFFFFF;
+
+  /* ═══════ SUB-BRAND ACCENTS — always gradient, never flat ═══════ */
+  --agents-ink:    #2F5A3A;
+  --creative-ink:  #8A2F72;
+  --api-ink:       #1E1916;
+  --subbrand-agents-bg:   url('brand-assets/subbrands/agents-gradient.jpg');
+  --subbrand-creative-bg: url('brand-assets/subbrands/creative-gradient.jpg');
+  --subbrand-api-bg:      url('brand-assets/subbrands/api-gradient.jpg');
+
+  /* ═══════ SEMANTIC (shadcn-compatible) ═══════ */
+  --background:var(--off-white); --foreground:var(--graphite);
+  --card:var(--white); --card-foreground:var(--graphite);
+  --popover:var(--white); --popover-foreground:var(--graphite);
+  --primary:var(--graphite); --primary-foreground:var(--off-white);
+  --secondary:var(--cream); --secondary-foreground:var(--graphite);
+  --muted:var(--cream); --muted-foreground:var(--mid-gray);
+  --border:var(--light-gray); --input:var(--light-gray); --ring:var(--graphite);
+  --destructive:#B42318; --radius:0.625rem;
+
+  /* ═══════ TYPE STACK ═══════ */
+  --font-brand:      'KMR Waldenburg', 'Inter', 'Helvetica Neue', system-ui, -apple-system, sans-serif;
+  --font-brand-semi: 'KMR Waldenburg SemiCondensed', 'KMR Waldenburg', 'Inter', system-ui, sans-serif;
+  --font-brand-cond: 'KMR Waldenburg Condensed', 'KMR Waldenburg', 'Inter', system-ui, sans-serif;
+  --font-deck:       'Instrument Sans', 'Inter', 'Helvetica Neue', system-ui, sans-serif;
+  --font-body:       'Inter', 'KMR Waldenburg', system-ui, sans-serif;
+  --font-mono:       'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* ═══════ TYPE SCALE ═══════ */
+  --fs-display:5rem; --fs-h1:3.625rem; --fs-h2:2.25rem; --fs-lede:1.6875rem;
+  --fs-body:1.125rem; --fs-small:0.875rem; --fs-label:1rem;
+
+  /* ═══════ RADII / SHADOWS ═══════ */
+  --radius-sm:0.375rem; --radius-md:0.625rem; --radius-lg:1rem; --radius-xl:1.5rem; --radius-full:9999px;
+  --shadow-sm:0 1px 2px rgba(30,25,22,.04), 0 1px 1px rgba(30,25,22,.03);
+  --shadow-md:0 4px 12px rgba(30,25,22,.06), 0 2px 4px rgba(30,25,22,.04);
+  --shadow-lg:0 12px 32px rgba(30,25,22,.08), 0 4px 8px rgba(30,25,22,.04);
+}
+
+/* ═══════ BASE ═══════ */
+html { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+body { margin:0; font-family:var(--font-body); font-size:var(--fs-body); line-height:1.5; color:var(--graphite); background:var(--off-white); }
+h1,h2,h3,h4,h5,h6 { font-family:var(--font-brand); font-weight:400; line-height:1; letter-spacing:-0.02em; color:var(--graphite); margin:0; }
+
+.display { font-family:var(--font-brand); font-size:var(--fs-display); font-weight:300; letter-spacing:-0.02em; line-height:1; }
+.lede    { font-family:var(--font-brand); font-size:var(--fs-lede); font-weight:300; line-height:1.5; }
+.label   { font-family:var(--font-body); font-size:var(--fs-label); font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--graphite); }
+.mono    { font-family:var(--font-mono); }
+.muted   { color:var(--mid-gray); }
+.surface-cream { background:var(--cream); }
