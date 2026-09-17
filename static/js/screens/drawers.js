@@ -5,12 +5,13 @@ import {
 } from '../derive.js';
 import { contextWindow } from '../models.js';
 import {
-  barBg, dur, h, int, ms, num, pct, rate1k, spark, stampOf, sum, usd,
+  attr, barBg, dur, h, int, ms, num, pct, rate1k, spark, stampOf, sum, usd,
 } from '../util.js';
 
-function shell(inner, wide) {
+function shell(inner, variant) {
+  const cls = variant ? ' drawer--' + variant : '';
   return `<div class="scrim" data-act="close-drawer"></div>`
-    + `<div class="drawer${wide ? ' drawer--wide' : ''}">${inner}</div>`;
+    + `<div class="drawer${cls}">${inner}</div>`;
 }
 
 /**
@@ -281,6 +282,137 @@ function turnFlags(turn) {
   return flags;
 }
 
+/** Categorical ramp for the node breakdown, plus a neutral for the tail. */
+const SLICE_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)',
+  'var(--s5)', 'var(--s6)', 'var(--s7)'];
+const TAIL_COLOR = 'var(--ink-3)';
+
+/** How many nodes get their own slice before the rest become "other". */
+const SLICE_TOP = 7;
+
+/**
+ * Tokens per *node*, not per step.
+ *
+ * The path table lists executions — `Evaluar y Responder` appears five separate
+ * times in one real conversation — so reading "which node consumed the tokens"
+ * off it means adding rows up by eye. This regroups repeated executions under
+ * one node and keeps the execution count, because a node that cost a lot over
+ * eight visits is a different finding from one that cost it in a single call.
+ */
+function nodeTokenBreakdown(steps, names) {
+  const byNode = new Map();
+  steps.forEach((step, i) => {
+    const name = names[i] || {};
+    const key = step.nodeId;
+    if (!byNode.has(key)) {
+      byNode.set(key, { key, label: name.label || step.nodeId, agent: name.agent || null,
+        tin: 0, tout: 0, cost: 0, executions: 0 });
+    }
+    const row = byNode.get(key);
+    row.tin += step.tin || 0;
+    row.tout += step.tout || 0;
+    row.cost += step.cost || 0;
+    row.executions += 1;
+  });
+  return Array.from(byNode.values());
+}
+
+/**
+ * Donut of one measure across nodes, with its own legend.
+ *
+ * A slice per node down to `SLICE_TOP`, then one grouped tail — a 40-node
+ * conversation rendered as 40 slices is a colour wheel, not a finding. Nodes
+ * that contributed nothing to *this* measure are left out entirely rather than
+ * drawn as zero-width slices: on a voice agent most nodes emit no output
+ * tokens, and they would otherwise fill the legend with noise.
+ */
+function tokenDonut(rows, measure, title, note) {
+  const contributing = rows
+    .filter((r) => (r[measure] || 0) > 0)
+    .sort((a, b) => b[measure] - a[measure]);
+  const total = contributing.reduce((a, r) => a + r[measure], 0);
+  if (!total) {
+    return `<div class="card" style="flex:1 1 260px;min-width:0">
+      <div class="card__head"><h3>${h(title)}</h3></div>
+      <div class="card__body"><div class="ph">No ${h(measure === 'tin' ? 'input' : 'output')}
+        tokens on this conversation's steps.</div></div>
+    </div>`;
+  }
+
+  const head = contributing.slice(0, SLICE_TOP);
+  const tail = contributing.slice(SLICE_TOP);
+  const slices = head.map((r, i) => ({
+    label: r.label, agent: r.agent, value: r[measure], executions: r.executions,
+    color: SLICE_COLORS[i % SLICE_COLORS.length],
+  }));
+  if (tail.length) {
+    slices.push({
+      label: tail.length + ' other node' + (tail.length === 1 ? '' : 's'),
+      agent: null,
+      value: tail.reduce((a, r) => a + r[measure], 0),
+      executions: tail.reduce((a, r) => a + r.executions, 0),
+      color: TAIL_COLOR,
+    });
+  }
+
+  const R = 54;
+  const RI = 32;
+  const C = 60;
+  const pt = (angle, radius) => [
+    (C + radius * Math.cos(angle)).toFixed(2),
+    (C + radius * Math.sin(angle)).toFixed(2),
+  ];
+  let start = -Math.PI / 2;
+  const arcs = slices.map((sl) => {
+    const sweep = (sl.value / total) * Math.PI * 2;
+    const end = start + sweep;
+    // A slice at 100% is a full turn, and an arc of exactly 2π draws nothing —
+    // the start and end points coincide. One conversation can easily run a
+    // single node, so this is reached in practice, not in theory.
+    if (sl.value === total) {
+      start = end;
+      return `<circle cx="${C}" cy="${C}" r="${(R + RI) / 2}" fill="none"
+        stroke="${sl.color}" stroke-width="${R - RI}"><title>${h(sl.label)} — 100%</title></circle>`;
+    }
+    const large = sweep > Math.PI ? 1 : 0;
+    const [x1, y1] = pt(start, R);
+    const [x2, y2] = pt(end, R);
+    const [x3, y3] = pt(end, RI);
+    const [x4, y4] = pt(start, RI);
+    start = end;
+    return `<path d="M${x1} ${y1} A${R} ${R} 0 ${large} 1 ${x2} ${y2} L${x3} ${y3}`
+      + ` A${RI} ${RI} 0 ${large} 0 ${x4} ${y4} Z" fill="${sl.color}">`
+      + `<title>${h(sl.label)} — ${int(sl.value)} tokens, ${pct(sl.value / total)}</title></path>`;
+  }).join('');
+
+  return `<div class="card" style="flex:1 1 260px;min-width:0">
+    <div class="card__head"><h3>${h(title)}</h3>
+      <div class="sub">${h(note)}</div></div>
+    <div class="card__body">
+      <div class="row row--wrap" style="gap:14px;align-items:center">
+        <svg viewBox="0 0 120 120" width="120" height="120" style="flex:none"
+             role="img" aria-label="${attr(title)} across ${slices.length} groups">
+          ${arcs}
+          <text x="${C}" y="${C - 2}" text-anchor="middle"
+            style="font-family:var(--font-brand);font-size:15px;fill:var(--ink)">${h(num(total))}</text>
+          <text x="${C}" y="${C + 11}" text-anchor="middle"
+            style="font-family:var(--font-mono);font-size:7.5px;fill:var(--ink-3);letter-spacing:.1em">TOKENS</text>
+        </svg>
+        <div class="stack" style="flex:1 1 150px;min-width:0;gap:4px">
+          ${slices.map((sl) => `
+            <div class="row" style="gap:7px;align-items:baseline;min-width:0">
+              <i style="width:9px;height:9px;border-radius:2px;background:${sl.color};flex:none"></i>
+              <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+                white-space:nowrap;font-size:11.5px">${h(sl.label)}${sl.executions > 1
+                  ? `<span class="muted"> ×${sl.executions}</span>` : ''}</span>
+              <span class="mono" style="flex:none;font-size:10.5px;color:var(--ink-3)">${pct(sl.value / total)}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 export function renderConvDrawer(model, convId) {
   const conv = model.allConversations.find((c) => c.id === convId);
   if (!conv) return '';
@@ -300,13 +432,24 @@ export function renderConvDrawer(model, convId) {
   // One pass, shared by the chart's tooltips and the path table below it, so the
   // two can never disagree about what a step is called.
   const stepNames = steps.map((s) => stepName(model, s));
+  // Grouped by node, so the pies answer "which node consumed this" without a
+  // reader adding up repeated executions in the path table below.
+  const nodeBreakdown = nodeTokenBreakdown(steps, stepNames);
+  // Two bases, exactly as at window level (§7.2d): the tiles report what was
+  // billed out of `metadata.charging`, while the growth chart, the donuts and
+  // the path table all sum `transcript[].llm_usage`. The difference is
+  // generation begun and then abandoned, which no turn recorded — so it has no
+  // step to sit on and cannot appear in a per-node breakdown.
+  const perTurnIn = steps.reduce((a, s) => a + (s.tin || 0), 0);
+  const perTurnOut = steps.reduce((a, s) => a + (s.tout || 0), 0);
+  const unrecordedIn = Math.max(0, conv.tin - perTurnIn);
 
   return shell(`
-    <div class="row" style="align-items:flex-start;gap:10px">
+    <div class="cvd__head row" style="align-items:flex-start;gap:10px;padding-bottom:12px">
       <div style="flex:1;min-width:0">
         <h2 style="font-family:var(--font-brand);font-size:21px">Conversation</h2>
-        <div class="mono small muted" style="margin-top:4px">${h(conv.id)}</div>
-        <div class="row row--wrap" style="gap:6px;margin-top:8px">
+        <div class="row row--wrap" style="gap:6px;margin-top:6px">
+          <span class="mono small muted">${h(conv.id)}</span>
           <span class="${h(conv.outcome.cls)}">${h(conv.outcome.label)}</span>
           <span class="badge mono">${h(stampOf(conv.startedAt, conv.timezone))}</span>
           <span class="badge mono">${dur(conv.duration)}</span>
@@ -318,31 +461,51 @@ export function renderConvDrawer(model, convId) {
       <button class="btn btn--ghost btn--sm" data-act="close-drawer">Close</button>
     </div>
 
-    <div class="row row--wrap" style="margin-top:16px;gap:14px;align-items:stretch">
-      <div class="card" style="flex:1.6 1 380px;min-width:0;display:flex;flex-direction:column">
-        <div class="card__head"><h3>Token growth</h3>
-          <div class="sub">cumulative, by step — step numbers match the path below</div></div>
-        <div class="card__body" style="padding:10px 12px 8px">${tokenGrowthChart(steps, stepNames)}</div>
-      </div>
-      <div class="stack" style="flex:1 1 190px;min-width:180px;gap:10px">
-        <div class="tile tile--accent"><div class="tile__k">llm cost</div><div class="tile__v">${usd(conv.cost)}</div>
-          <div class="tile__note">${avg ? ((conv.cost / avg - 1) * 100).toFixed(0) + '% vs average' : ''}</div></div>
-        <div class="row" style="gap:10px">
-          <div class="tile" style="flex:1;min-width:0"><div class="tile__k">tok in</div>
-            <div class="tile__v">${num(conv.tin)}</div></div>
-          <div class="tile" style="flex:1;min-width:0"><div class="tile__k">tok out</div>
-            <div class="tile__v">${num(conv.tout)}</div></div>
-        </div>
-        <div class="note" style="margin:0"><span>
-          All-in USD <b>${conv.costFiat == null ? 'not reported' : usd(conv.costFiat)}</b>
-          ${conv.costCredits != null ? ' · ' + int(conv.costCredits) + ' credits' : ''}
-          ${analysisCost != null ? ' · post-call analysis ' + usd(analysisCost) + ', kept out of the node ledger' : ''}.
-          The cost tile is LLM turn cost only, which is what the node ledger reconciles against.
-        </span></div>
-      </div>
+    <div class="cvd">
+    <div class="cvd__col cvd__left">
+
+    <div class="card">
+      <div class="card__head"><h3>Token growth</h3>
+        <div class="sub">cumulative, by step — step numbers match the path on the right</div></div>
+      <div class="card__body" style="padding:10px 12px 8px">${tokenGrowthChart(steps, stepNames)}</div>
     </div>
 
-    <div class="card" style="margin-top:12px">
+    <div class="row row--wrap" style="gap:12px;align-items:stretch">
+      ${tokenDonut(nodeBreakdown, 'tin', 'Input tokens by node',
+        'per turn · repeat executions grouped')}
+      ${tokenDonut(nodeBreakdown, 'tout', 'Output tokens by node',
+        'per turn · what the model wrote')}
+    </div>
+
+    <!-- The totals sit under the graphs, on one line: three tiles and the
+         all-in note sharing a row, so the left column ends with the summary
+         rather than opening on it. -->
+    <div class="row row--wrap" style="gap:10px;align-items:stretch">
+      <div class="tile tile--accent" style="flex:1 1 130px;min-width:0">
+        <div class="tile__k">llm cost</div><div class="tile__v">${usd(conv.cost)}</div>
+        <div class="tile__note">${avg ? ((conv.cost / avg - 1) * 100).toFixed(0) + '% vs average' : ''}</div></div>
+      <div class="tile" style="flex:1 1 120px;min-width:0">
+        <div class="tile__k">tok in</div><div class="tile__v">${num(conv.tin)}</div>
+        <div class="tile__note">billed${unrecordedIn > 0
+          ? ` · ${num(perTurnIn)} on turns` : ''}</div></div>
+      <div class="tile" style="flex:1 1 120px;min-width:0">
+        <div class="tile__k">tok out</div><div class="tile__v">${num(conv.tout)}</div>
+        <div class="tile__note">billed</div></div>
+      <div class="note" style="margin:0;flex:2 1 260px;min-width:0"><span>
+        All-in USD <b>${conv.costFiat == null ? 'not reported' : usd(conv.costFiat)}</b>
+        ${conv.costCredits != null ? ' · ' + int(conv.costCredits) + ' credits' : ''}
+        ${analysisCost != null ? ' · post-call analysis ' + usd(analysisCost) + ', kept out of the node ledger' : ''}.
+        The cost tile is LLM turn cost only, which is what the node ledger reconciles against.${
+        unrecordedIn > 0 ? ` The graphs above sum <span class="mono">transcript[].llm_usage</span>
+        and total ${num(perTurnIn)} input tokens against the ${num(conv.tin)} billed; the
+        ${num(unrecordedIn)}-token difference is generation begun and then abandoned, which no turn
+        recorded and no node can own.` : ''}
+      </span></div>
+    </div>
+
+    </div><div class="cvd__col cvd__right">
+
+    <div class="card">
       <div class="card__head"><h3>Where the tokens went</h3><div class="sub">node path, in execution order</div></div>
       <div class="card__body" style="padding:4px 8px">
         <table class="tbl tbl--tight">
@@ -377,7 +540,7 @@ export function renderConvDrawer(model, convId) {
           : 'No charging block on this conversation — both figures are per-turn usage.'}</span></div>
     </div>
 
-    <div class="card" style="margin-top:12px">
+    <div class="card">
       <div class="card__head"><h3>Transcript</h3><div class="sub">token cost attributed per turn</div></div>
       <div class="card__body stack" style="gap:8px">
         ${transcript.map((turn) => {
@@ -401,5 +564,7 @@ export function renderConvDrawer(model, convId) {
       </div>
       <div class="card__foot"><span>Turn costs sum to ${usd(sum(transcript.map((t) => usageCost(collectModelUsage(t.llm_usage)))))} —
         the per-turn view. Billed total is ${usd(conv.cost)}.</span></div>
-    </div>`, true);
+    </div>
+
+    </div></div>`, 'full');
 }
